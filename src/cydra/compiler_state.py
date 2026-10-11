@@ -318,7 +318,9 @@ def _compile_hardhat_state_effects(project_path: Path, source_path: Path) -> Com
                item.function_ast_node_id, item.target_ast_node_id, item.source_location)
         unique_evidence.setdefault(key, item)
     unique_constraints = tuple(dict.fromkeys(constraints))
-    if not build_files:
+    if unresolved_imports:
+        status = "source_dependency_closure_incomplete"
+    elif not build_files:
         status = "no_build_info_artifacts"
     elif unique_evidence or unique_constraints:
         status = "success"
@@ -400,7 +402,9 @@ def compile_state_effects(project: str | Path, source: str | Path) -> CompilerEv
                 constraints.extend(extract_constraints_from_build_info(build_file, source_path, project_path, allowlist))
             except (OSError, json.JSONDecodeError):
                 continue
-        if not build_files:
+        if unresolved_imports:
+            status = "source_dependency_closure_incomplete"
+        elif not build_files:
             status = "no_build_info_artifacts"
         elif evidence or constraints:
             status = "success"
