@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from pathlib import Path
+import re
 from typing import Literal
 
 from .models import ContractModel, FunctionModel
@@ -35,6 +37,34 @@ def _is_lifecycle_surface(function: FunctionModel) -> bool:
     )
 
 
+def _observed_writes(contract: ContractModel, function: FunctionModel) -> tuple[str, ...]:
+    if function.writes:
+        return tuple(function.writes)
+    # Recover a narrow source-linked witness when the first-pass model omitted it.
+    try:
+        source = Path(function.source or contract.source).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return ()
+    pattern = re.compile(r"\\bfunction\\s+" + re.escape(function.name) + r"\\s*\\([^)]*\\)[^{;]*\\{", re.MULTILINE)
+    match = pattern.search(source)
+    if not match:
+        return ()
+    depth = 1
+    end = match.end()
+    while end < len(source) and depth:
+        if source[end] == "{":
+            depth += 1
+        elif source[end] == "}":
+            depth -= 1
+        end += 1
+    body = source[match.end():end - 1]
+    writes = [
+        name for name in contract.state_variables
+        if re.search(r"\\b" + re.escape(name) + r"\\b(?:\\s*\\[[^]]*\\])*\\s*(?:=(?!=)|\\+=|-=|\\*=|/=|\\+\\+|--)", body)
+    ]
+    return tuple(sorted(set(writes)))
+
+
 def generate_hypothesis_seeds(contracts: tuple[ContractModel, ...] | list[ContractModel]) -> tuple[HypothesisSeed, ...]:
     """Emit provisional questions from modeled externally callable state writes.
 
@@ -44,11 +74,13 @@ def generate_hypothesis_seeds(contracts: tuple[ContractModel, ...] | list[Contra
     seeds: list[HypothesisSeed] = []
     for contract in contracts:
         for function in contract.functions:
-            if function.visibility not in {"public", "external"} or not function.writes:
+            if function.visibility not in {"public", "external"}:
                 continue
-
+            observed_writes = _observed_writes(contract, function)
             lifecycle = _is_lifecycle_surface(function)
-            writes = ", ".join(function.writes)
+            if not observed_writes and not lifecycle:
+                continue
+            writes = ", ".join(observed_writes) if observed_writes else "lifecycle-sensitive state"
             source = function.source or contract.source
             if lifecycle:
                 question = f"Can a caller outside the intended trust boundary change {writes} through {function.name} in a reachable deployment state?"
@@ -67,7 +99,6 @@ def generate_hypothesis_seeds(contracts: tuple[ContractModel, ...] | list[Contra
                     "source-level writes do not establish runtime reachability",
                     "effective inherited/helper guards require validation",
                 )
-
             seeds.append(HypothesisSeed(
                 seed_id=f"SEED-AUTH-{contract.name}-{function.name}-{function.line}",
                 target_contract=contract.name,
@@ -79,7 +110,7 @@ def generate_hypothesis_seeds(contracts: tuple[ContractModel, ...] | list[Contra
                 status=status,
                 source=source,
                 source_line=function.line,
-                observed_writes=tuple(function.writes),
+                observed_writes=observed_writes,
                 uncertainty=uncertainty,
             ))
     return tuple(seeds)
