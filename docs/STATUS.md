@@ -74,13 +74,12 @@ The parser now models direct writes, same-contract helper-mediated writes, payab
 - The manual campaign workflow now runs this validation before target analysis.
 - Scope caveat is explicit: syntax validation does not independently establish that a repository, source path, or deployed revision is covered by a bounty program.
 
-## Held-out 0x Settler campaign — pending measurement
+## Held-out 0x Settler campaign — measured, blocked
 
-- Official program scope: https://immunefi.com/bug-bounty/0x/scope/
-- Public source repository: https://github.com/0xProject/0x-settler
-- Pinned source revision for the isolated measurement: 872b0e4cc83cce6a75eb4a1705f5bfd06e21a6c5
-- Source entry point: src/chains/Mainnet/Intent.sol
-- Dedicated workflow: .github/workflows/heldout-0x-settler.yml on branch campaigns/held-out-0x-settler
-- This revision appeared in a public Settler deployment GitCommit event, but the current registry owner/previous deployment must be checked before treating this exact revision as the current bounty-reporting target.
-- The workflow is local-source-only, has read-only repository permissions, records no-hypothesis outcomes without calling them secure, and keeps the readiness gate enabled.
-- Result is pending verification; no finding or unfamiliar-target capability claim is made from workflow creation alone.
+- Workflow: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38126115013
+- Report: docs/campaigns/2026-10-11-0x-settler-heldout.md
+- The workflow completed and uploaded an artifact. It selected zero authorization hypotheses and executed zero candidate experiments.
+- Disposition is BLOCKED / NOT_READY, not a finding and not a security pass.
+- The model only evidenced the entry contract's local functions; inherited meta-transaction execution and downstream external-effect authorization were not validated.
+- The pinned commit was observed in a public Settler GitCommit event, but the current eligible deployed revision must be verified before bounty reporting.
+- Next capability closure: trace inherited function and caller/signer authorization through the meta-transaction path, with local positive/negative signature controls.
