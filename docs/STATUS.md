@@ -23,11 +23,12 @@
   - This is an existing public issue, not a novel bounty discovery.
 - Protected negative control passed at run #38124212770: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38124212770
   - The state-gated setWhitelist test executed and classified as not_confirmed.
-- The old unfamiliar-target campaign selected zero authorization hypotheses for its unfamiliar targets. The new repository has not yet established a successful unfamiliar-target campaign.
+- Fresh blind unfamiliar-target replay on Immunefi Vaults Splitter failed closed with zero authorization hypotheses: run #38124305839. The model listed five functions but surfaced no direct state writes and emitted no authorization invariant; no experiment ran. This is NOT_SELECTED / BLOCKED, not evidence of safety. Details: docs/campaigns/2026-10-11-vaults-splitter.md.
+- The unfamiliar-target hypothesis-selection blocker therefore remains open; no novel finding has been established.
 
 ## Current limitations
-- This is a partial code migration, not a claim that every capability from the source repository has been moved.
-- Positive and negative controls are now demonstrated in the new repository, but the unfamiliar-target hypothesis-selection blocker remains open.
+- This is a curated migration, not a claim that every useful capability from the source repository has been moved.
+- Positive and negative controls are demonstrated, but the unfamiliar-target hypothesis-selection blocker remains open.
 - No novel, independently verified bounty finding has been established from this repository.
 - The current Python regression and latest branch checks must remain green before merging.
 
