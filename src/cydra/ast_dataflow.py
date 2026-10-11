@@ -56,18 +56,62 @@ def _state_refs(node: Any, states: dict[int, str]) -> list[dict[str, Any]]:
             and item["referencedDeclaration"] in states]
 
 
+def _lvalue_state_roots(node: Any, states: dict[int, str]) -> list[dict[str, Any]]:
+    """Resolve only the storage root of an lvalue, never an index/key expression."""
+    if not isinstance(node, dict):
+        return []
+    kind = node.get("nodeType")
+    if kind == "Identifier":
+        ref = node.get("referencedDeclaration")
+        return [node] if isinstance(ref, int) and ref in states else []
+    if kind in {"IndexAccess", "IndexRangeAccess"}:
+        return _lvalue_state_roots(node.get("baseExpression"), states)
+    if kind == "MemberAccess":
+        return _lvalue_state_roots(node.get("expression"), states)
+    if kind == "TupleExpression":
+        result: list[dict[str, Any]] = []
+        components = node.get("components")
+        if isinstance(components, list):
+            for component in components:
+                result.extend(_lvalue_state_roots(component, states))
+        return result
+    return []
+
+
 def _mark_lvalue_roles(node: Any, states: dict[int, str], roles: dict[int, str], role: str) -> None:
-    """Mark the storage-root state reference; index/member expressions remain reads."""
-    refs = _state_refs(node, states)
-    if not refs:
-        return
-    first = _node_id(refs[0])
-    if first is not None:
-        roles[first] = role
-    for ref in refs[1:]:
+    """Mark storage-root state references; state variables used as keys remain reads."""
+    roots = _lvalue_state_roots(node, states)
+    root_ids = {_node_id(item) for item in roots if _node_id(item) is not None}
+    for root_id in root_ids:
+        roles[root_id] = role
+    for ref in _state_refs(node, states):
         ref_id = _node_id(ref)
-        if ref_id is not None and ref_id not in roles:
+        if ref_id is not None and ref_id not in root_ids and ref_id not in roles:
             roles[ref_id] = "read"
+
+
+def _yul_expression(node: Any) -> str:
+    if not isinstance(node, dict):
+        return ""
+    kind = node.get("nodeType")
+    if kind in {"YulIdentifier", "YulLiteral"}:
+        value = node.get("name") if kind == "YulIdentifier" else node.get("value")
+        return str(value) if value is not None else ""
+    if kind == "YulFunctionCall":
+        function = node.get("functionName")
+        name = function.get("name") if isinstance(function, dict) else None
+        args = node.get("arguments", [])
+        rendered = [_yul_expression(item) for item in args] if isinstance(args, list) else []
+        if isinstance(name, str) and all(rendered):
+            return f"{name}({', '.join(rendered)})"
+        return str(name) if isinstance(name, str) else ""
+    if kind == "YulBinaryOperation":
+        op = node.get("operator")
+        left = _yul_expression(node.get("leftExpression"))
+        right = _yul_expression(node.get("rightExpression"))
+        if isinstance(op, str) and left and right:
+            return f"{op}({left}, {right})"
+    return ""
 
 
 def _operator_contexts(body: dict[str, Any], states: dict[int, str]) -> dict[int, str]:
@@ -98,7 +142,11 @@ def extract_ast_relationships(ast: dict[str, Any], file: str) -> list[SemanticRe
         node_id = node.get("id")
         if isinstance(node_id, int):
             declarations[node_id] = node
-        if node.get("nodeType") == "VariableDeclaration" and node.get("stateVariable") is True:
+        if (
+            node.get("nodeType") == "VariableDeclaration"
+            and node.get("stateVariable") is True
+            and node.get("mutability", "mutable") not in {"constant", "immutable"}
+        ):
             if isinstance(node.get("name"), str) and isinstance(node_id, int):
                 states[node_id] = node["name"]
 
@@ -116,6 +164,32 @@ def extract_ast_relationships(ast: dict[str, Any], file: str) -> list[SemanticRe
         if not isinstance(body, dict):
             continue
         roles = _operator_contexts(body, states)
+        # Yul storage operations are not represented as Solidity VariableDeclaration
+        # references. Record them as opaque, function-scoped effects; never equate
+        # unrelated dynamic slot expressions or promote them directly to findings.
+        for yul_call in _walk(body):
+            if yul_call.get("nodeType") != "YulFunctionCall":
+                continue
+            function_node = yul_call.get("functionName")
+            operation = function_node.get("name") if isinstance(function_node, dict) else None
+            if operation not in {"sstore", "sload", "tstore", "tload"}:
+                continue
+            args = yul_call.get("arguments", [])
+            rendered = [_yul_expression(arg) for arg in args] if isinstance(args, list) else []
+            slot_expression = rendered[0] if rendered else "unknown"
+            relation = "writes" if operation in {"sstore", "tstore"} else "reads"
+            evidence.append(SemanticRelationshipEvidence(
+                contract=str(contract), function=str(function_name), relation=relation,
+                target=f"YUL_SLOT:{function_name}:{slot_expression}",
+                confidence=0.75, source=f"solc-json-ast-yul:{file}",
+                ast_node_id=_node_id(yul_call), source_location=_location(yul_call),
+                function_ast_node_id=function_id,
+                metadata={
+                    "function_kind": kind, "semantic_relation": relation,
+                    "storage_operation": operation, "storage_slot_expression": slot_expression,
+                    "storage_slot_comparable": False, "evidence_scope": "opaque-yul",
+                },
+            ))
         for item in _walk(body):
             if item.get("nodeType") != "Identifier":
                 continue
