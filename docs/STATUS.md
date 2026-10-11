@@ -51,3 +51,14 @@ The new repository has working positive and negative control loops, but has not 
 - This is NOT_SELECTED / BLOCKED, not a finding and not proof of safety. Full report: docs/campaigns/2026-10-11-openzeppelin-openbridge.md.
 
 The library-mediated storage gap has a generic regression fix in PR #6: qualified state types and common collection mutators are now represented as candidate state effects. The fix is covered by a regression fixture and passed Python regression on run #38124766980.
+
+
+## OpenBridge replay after library-state fix
+- Run: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38124905344
+- After PR #6, the model surfaced addGateway/removeGateway writes to _gateways and retained the existing _threshold/_remotes writes.
+- The administrative functions were owner-protected, so the run still selected no authorization hypothesis and executed no candidate experiment.
+- This is an expected no-candidate result for the visible administrative surface, not a finding and not proof of full target safety.
+- Report: docs/campaigns/2026-10-11-openbridge-after-library-effects.md.
+
+## Current readiness
+The parser now models direct writes, same-contract helper-mediated writes, payable state declarations, and common collection mutators on qualified state types. Positive and negative controls pass. The specialist still has not demonstrated a novel or held-out unfamiliar-target authorization finding; the next milestone is a held-out positive control or a currently eligible target with a genuine authorization boundary failure, tested blind.
