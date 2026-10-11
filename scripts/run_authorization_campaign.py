@@ -17,6 +17,7 @@ from cydra.authorization_pipeline import investigate_authorization
 from cydra.reasoning import (
     _declared_modifiers,
     _effective_declared_modifiers,
+    initialization_surface_functions,
     plan_access_control_experiment,
 )
 
@@ -211,6 +212,24 @@ def _no_hypothesis_payload(target, compiler, result, related_intent_parity_hypot
     """Preserve no-auth and unsupported-related-hypothesis outcomes without calling either a finding."""
     related = _json(related_intent_parity_hypotheses)
     has_related = bool(related_intent_parity_hypotheses)
+    lifecycle_surfaces = [
+        {
+            "contract": contract.name,
+            "function": function.name,
+            "source": function.source or contract.source,
+            "source_line": function.line,
+            "modifiers": list(function.modifiers),
+            "writes": list(function.writes),
+            "disposition": "DEPLOYMENT_STATE_REQUIRED",
+            "reason": (
+                "Initialization modifiers and naming identify a lifecycle-sensitive surface; "
+                "do not promote it to a vulnerability without evidence of the deployed proxy's "
+                "initialization state and deployment calldata."
+            ),
+        }
+        for contract in result.contracts
+        for function in initialization_surface_functions(contract)
+    ]
     surface_coverage = []
     for contract in result.contracts:
         for function in contract.functions:
@@ -259,6 +278,7 @@ def _no_hypothesis_payload(target, compiler, result, related_intent_parity_hypot
             "semantic_relationship_count": len(compiler.evidence),
             "parameter_constraint_count": len(compiler.constraints),
         },
+        "lifecycle_surfaces": lifecycle_surfaces,
         "contracts": [
             {
                 "name": contract.name,
