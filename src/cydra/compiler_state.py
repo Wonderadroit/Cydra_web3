@@ -46,24 +46,46 @@ def _source_keys(payload: dict[str, Any], source: Path, project: Path) -> tuple[
     return tuple(candidates)
 
 
+def _source_asts(payload: dict[str, Any]) -> tuple[tuple[str, dict[str, Any]], ...]:
+    """Return every compiler AST in this build unit, including imported base contracts.
+
+    Authorization effects often live in inherited contracts rather than the concrete
+    deployment entry file. Restricting extraction to the entry source silently drops
+    those effects even when the compiler supplied their ASTs in the same build-info.
+    """
+    output = payload.get("output")
+    sources = output.get("sources") if isinstance(output, dict) else None
+    if not isinstance(sources, dict):
+        return ()
+    return tuple(
+        (key, source_payload["ast"])
+        for key, source_payload in sources.items()
+        if isinstance(key, str)
+        and isinstance(source_payload, dict)
+        and isinstance(source_payload.get("ast"), dict)
+    )
+
+
 def extract_state_effects_from_build_info(build_info: Path, source: Path, project: Path) -> tuple[SemanticRelationshipEvidence, ...]:
     payload = json.loads(build_info.read_text(encoding="utf-8"))
     evidence: list[SemanticRelationshipEvidence] = []
-    for source_key, source_payload in _source_keys(payload, source, project):
-        ast = source_payload.get("ast")
-        if isinstance(ast, dict):
-            evidence.extend(extract_ast_relationships(ast, source_key))
-    return tuple(evidence)
+    for source_key, ast in _source_asts(payload):
+        evidence.extend(extract_ast_relationships(ast, source_key))
+    # A project can emit multiple build-info records that repeat imported sources.
+    unique: dict[tuple[Any, ...], SemanticRelationshipEvidence] = {}
+    for item in evidence:
+        key = (item.source, item.function, item.relation, item.target, item.ast_node_id,
+               item.function_ast_node_id, item.target_ast_node_id, item.source_location)
+        unique.setdefault(key, item)
+    return tuple(unique.values())
 
 
 def extract_constraints_from_build_info(build_info: Path, source: Path, project: Path) -> tuple[ConstraintEvidence, ...]:
     payload = json.loads(build_info.read_text(encoding="utf-8"))
     evidence: list[ConstraintEvidence] = []
-    for source_key, source_payload in _source_keys(payload, source, project):
-        ast = source_payload.get("ast")
-        if isinstance(ast, dict):
-            evidence.extend(extract_parameter_constraints(ast, source_key))
-    return tuple(evidence)
+    for source_key, ast in _source_asts(payload):
+        evidence.extend(extract_parameter_constraints(ast, source_key))
+    return tuple(dict.fromkeys(evidence))
 
 
 def _build_info_ast_diagnostics(
