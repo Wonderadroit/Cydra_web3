@@ -67,6 +67,8 @@ class FunctionModel:
     # Return expressions are syntax/data-flow evidence for functions that may produce
     # a value consumed by an execution predicate. They do not prove satisfiability.
     return_expressions: tuple[str, ...] = field(default_factory=tuple)
+    # Absolute source path when known; inherited function models retain their declaring file.
+    source: str | None = None
 
 
 @dataclass(frozen=True)
