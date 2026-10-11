@@ -5,6 +5,7 @@ import os
 import subprocess
 import tempfile
 import shutil
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -124,6 +125,25 @@ def _is_hardhat_project(project: Path) -> bool:
     )
 
 
+def _hardhat_build_info_root(project: Path) -> Path:
+    """Resolve Hardhat's configured artifact directory, with common-path fallbacks."""
+    artifacts_dir = "artifacts"
+    for name in ("hardhat.config.js", "hardhat.config.ts", "hardhat.config.cjs"):
+        config = project / name
+        try:
+            source = config.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            continue
+        match = re.search(r"\bartifacts\s*:\s*['\"]([^'\"]+)['\"]", source)
+        if match:
+            artifacts_dir = match.group(1)
+        break
+    configured = Path(artifacts_dir)
+    if not configured.is_absolute():
+        configured = project / configured
+    return configured / "build-info"
+
+
 def _hardhat_commands(project: Path) -> tuple[tuple[str, ...], tuple[str, ...]]:
     if (project / "yarn.lock").is_file():
         return (
@@ -153,14 +173,14 @@ def _compile_hardhat_state_effects(project_path: Path, source_path: Path) -> Com
             installed.stdout, installed.stderr,
         )
 
-    build_info_root = project_path / "artifacts" / "build-info"
+    build_info_root = _hardhat_build_info_root(project_path)
     shutil.rmtree(build_info_root, ignore_errors=True)
     completed = subprocess.run(
         compile_command, cwd=project_path, text=True, capture_output=True, check=False
     )
     build_files = tuple(sorted(build_info_root.rglob("*.json")))
-    stdout = installed.stdout + "\\n" + completed.stdout
-    stderr = installed.stderr + "\\n" + completed.stderr
+    stdout = installed.stdout + "\n" + completed.stdout
+    stderr = installed.stderr + "\n" + completed.stderr
     if completed.returncode != 0:
         return CompilerEvidenceResult(
             (), (), True, "compile_failed", compile_command, stdout, stderr,
@@ -190,7 +210,9 @@ def _compile_hardhat_state_effects(project_path: Path, source_path: Path) -> Com
                item.function_ast_node_id, item.target_ast_node_id, item.source_location)
         unique_evidence.setdefault(key, item)
     unique_constraints = tuple(dict.fromkeys(constraints))
-    if unique_evidence or unique_constraints:
+    if not build_files:
+        status = "no_build_info_artifacts"
+    elif unique_evidence or unique_constraints:
         status = "success"
     elif source_ast_found:
         status = "ast_present_no_supported_evidence"
@@ -262,7 +284,9 @@ def compile_state_effects(project: str | Path, source: str | Path) -> CompilerEv
                 constraints.extend(extract_constraints_from_build_info(build_file, source_path, project_path))
             except (OSError, json.JSONDecodeError):
                 continue
-        if evidence or constraints:
+        if not build_files:
+            status = "no_build_info_artifacts"
+        elif evidence or constraints:
             status = "success"
         elif source_ast_found:
             status = "ast_present_no_supported_evidence"
