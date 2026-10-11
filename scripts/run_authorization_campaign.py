@@ -310,6 +310,21 @@ def _no_hypothesis_payload(target, compiler, result, related_intent_parity_hypot
             for item in compiler.evidence
             if item.relation != "reference"
         ],
+        "parameter_constraints": [
+            {
+                "contract": item.contract,
+                "context": item.function,
+                "context_kind": item.context_kind,
+                "parameter": item.parameter,
+                "parameter_index": item.parameter_index,
+                "predicate": item.predicate,
+                "kind": item.kind,
+                "source": item.source,
+                "source_location": item.source_location,
+                "ast_node_id": item.ast_node_id,
+            }
+            for item in compiler.constraints
+        ],
         "invariants": _json(result.invariants),
         "hypotheses": [],
         "related_intent_parity_hypotheses": related,
