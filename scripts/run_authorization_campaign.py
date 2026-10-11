@@ -559,7 +559,7 @@ def main() -> int:
                 repro= reproduction.status=="FAIL" and repro_patched.status=="PASS"
                 print("PATCHED_EXECUTION_STATUS", patched.status, "CAUSAL_VERIFICATION", causal)
                 print("REPRODUCTION_EXECUTION_STATUS", reproduction.status, "REPRODUCTION_PATCHED_EXECUTION_STATUS", repro_patched.status, "REPRODUCTION_VERIFICATION", repro)
-                payload.update({"authorization_control":modifier,"patched_execution":_json(patched),"causal_verification":{"state":"verified" if causal else "not_verified","chain_id":"causal:authorization-modifier-differential"},"reproduction_execution":_json(reproduction),"reproduction_patched_execution":_json(repro_patched),"reproduction_verification":{"state":"verified" if repro else "not_verified","chain_id":"reproduction:authorization-modifier-differential"},"finding_gate":"READY" if causal and repro else "NOT_READY"})
+                payload.update({"authorization_control":modifier,"patched_execution":_json(patched),"causal_verification":{"state":"verified" if causal else "not_verified","chain_id":"causal:authorization-modifier-differential"},"reproduction_execution":_json(reproduction),"reproduction_patched_execution":_json(repro_patched),"reproduction_verification":{"state":"verified" if repro else "not_verified","chain_id":"reproduction:authorization-modifier-differential"},"finding_gate":"READY" if causal and repro and compiler.status != "source_dependency_closure_incomplete" else "NOT_READY"})
                 if args.output:
                     args.output.parent.mkdir(parents=True,exist_ok=True)
                     args.output.write_text(json.dumps(_json(payload),indent=2)+"\n",encoding="utf-8")
