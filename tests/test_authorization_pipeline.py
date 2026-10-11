@@ -144,11 +144,11 @@ def test_lifecycle_write_emits_blocked_seed_even_without_supported_hypothesis(tm
 
     source = tmp_path / "Manager.sol"
     source.write_text(
-        "pragma solidity ^0.8.20;\\n"
-        "contract Manager {\\n"
-        "  address public manager;\\n"
-        "  function initializeManager(address next) external { manager = next; }\\n"
-        "}\\n",
+        "pragma solidity ^0.8.20;\n"
+        "contract Manager {\n"
+        "  address public manager;\n"
+        "  function initializeManager(address next) external { manager = next; }\n"
+        "}\n",
         encoding="utf-8",
     )
 
@@ -174,13 +174,13 @@ def test_seed_generator_keeps_protected_state_writer_as_question(tmp_path: Path)
 
     source = tmp_path / "Protected.sol"
     source.write_text(
-        "pragma solidity ^0.8.20;\\n"
-        "contract Protected {\\n"
-        "  address public owner;\\n"
-        "  address public manager;\\n"
-        "  modifier onlyOwner() { require(msg.sender == owner, 'owner'); _; }\\n"
-        "  function setManager(address next) external onlyOwner { manager = next; }\\n"
-        "}\\n",
+        "pragma solidity ^0.8.20;\n"
+        "contract Protected {\n"
+        "  address public owner;\n"
+        "  address public manager;\n"
+        "  modifier onlyOwner() { require(msg.sender == owner, 'owner'); _; }\n"
+        "  function setManager(address next) external onlyOwner { manager = next; }\n"
+        "}\n",
         encoding="utf-8",
     )
 
