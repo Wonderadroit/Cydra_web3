@@ -14,7 +14,11 @@ from cydra.blind_authorization import generate_blind_authorization_test_from_exp
 from cydra.compiler_state import compile_state_effects
 from cydra.foundry import ExecutionResult, require_executed, run_foundry_test, test_path_for
 from cydra.authorization_pipeline import investigate_authorization
-from cydra.reasoning import plan_access_control_experiment
+from cydra.reasoning import (
+    _declared_modifiers,
+    _effective_declared_modifiers,
+    plan_access_control_experiment,
+)
 
 _IMPORT_RE = re.compile(r'''\bimport\s+(?:[^\"']+\s+from\s+)?[\"']([^\"']+)[\"']\s*;''')
 
@@ -212,7 +216,15 @@ def _no_hypothesis_payload(target, compiler, result, related_intent_parity_hypot
         for function in contract.functions:
             if function.visibility not in {"public", "external"}:
                 continue
-            modifiers = list(function.modifiers)
+            declared_modifiers = list(_declared_modifiers(contract, function))
+            effective_modifiers = list(_effective_declared_modifiers(contract, function))
+            inherited_modifiers = [item for item in effective_modifiers if item not in declared_modifiers]
+            modifier_provenance = (
+                "inherited_super_dispatch" if inherited_modifiers
+                else "declared" if declared_modifiers
+                else "none"
+            )
+            modifiers = effective_modifiers
             writes = list(function.writes)
             if modifiers:
                 disposition = "MODIFIER_PRESENT_REQUIRES_SEMANTIC_VALIDATION"
@@ -226,6 +238,9 @@ def _no_hypothesis_payload(target, compiler, result, related_intent_parity_hypot
                 "function": function.name,
                 "visibility": function.visibility,
                 "modifiers": modifiers,
+                "declared_modifiers": declared_modifiers,
+                "effective_modifiers": effective_modifiers,
+                "modifier_provenance": modifier_provenance,
                 "model_writes": writes,
                 "heuristic_disposition": disposition,
                 "is_finding": False,
@@ -247,7 +262,14 @@ def _no_hypothesis_payload(target, compiler, result, related_intent_parity_hypot
                         "name": function.name,
                         "visibility": function.visibility,
                         "modifiers": list(function.modifiers),
+                        "effective_modifiers": list(_effective_declared_modifiers(contract, function)),
+                        "modifier_provenance": (
+                            "inherited_super_dispatch"
+                            if set(_effective_declared_modifiers(contract, function)) - set(_declared_modifiers(contract, function))
+                            else "declared" if _declared_modifiers(contract, function) else "none"
+                        ),
                         "writes": list(function.writes),
+                        "declaring_source": function.source or contract.source,
                     }
                     for function in contract.functions
                 ],
@@ -255,6 +277,21 @@ def _no_hypothesis_payload(target, compiler, result, related_intent_parity_hypot
             for contract in result.contracts
         ],
         "surface_coverage": surface_coverage,
+        "inherited_function_coverage": [
+            {
+                "contract": contract.name,
+                "function": function.name,
+                "visibility": function.visibility,
+                "modifiers": list(function.modifiers),
+                "writes": list(function.writes),
+                "declaring_source": function.source or "unknown",
+                "source_line": function.line,
+                "is_finding": False,
+            }
+            for contract in result.contracts
+            for function in contract.inherited_functions
+            if function.visibility in {"public", "external"}
+        ],
         "semantic_state_effects": [
             {
                 "contract": item.contract,
