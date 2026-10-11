@@ -69,3 +69,29 @@ def test_payable_state_and_helper_mediated_writer_are_modeled(tmp_path: Path):
         for effect in result.derived_effects
     )
     assert any(item.hypothesis_id == "H-AUTH-setTreasury" for item in result.hypotheses)
+
+
+def test_library_mutator_on_qualified_storage_variable_is_modeled(tmp_path: Path):
+    source = tmp_path / "LibraryTarget.sol"
+    source.write_text(
+        "pragma solidity ^0.8.20;\n"
+        "library SetLib { struct AddressSet { mapping(address => bool) values; } "
+        "function add(AddressSet storage self, address item) internal { self.values[item] = true; } }\n"
+        "contract LibraryTarget {\n"
+        "  using SetLib for SetLib.AddressSet;\n"
+        "  address public owner;\n"
+        "  SetLib.AddressSet private _gateways;\n"
+        "  modifier onlyOwner() { require(msg.sender == owner, 'owner'); _; }\n"
+        "  function addGateway(address gateway) external { _gateways.add(gateway); }\n"
+        "  function adminAddGateway(address gateway) external onlyOwner { _gateways.add(gateway); }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    result = investigate_authorization(source, target="library-mutation-control@pinned")
+    contract = next(item for item in result.contracts if item.name == "LibraryTarget")
+    functions = {item.name: item for item in contract.functions}
+
+    assert "_gateways" in contract.state_variables
+    assert "_gateways" in functions["addGateway"].writes
+    assert any(item.hypothesis_id == "H-AUTH-addGateway" for item in result.hypotheses)
