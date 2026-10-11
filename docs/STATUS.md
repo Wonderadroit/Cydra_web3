@@ -2,40 +2,45 @@
 
 ## Repository baseline
 - Destination: Wonderadroit/Cydra_web3
-- Migration branch: migration/authorization-specialist-bootstrap
 - Source repository: Wonderadroit/Cydra_wonder
 - Source commit inspected and pinned for migration/control: 99f43987376a327c423ddde2877ce9995564d254
+- Main contains the curated authorization-specialist bootstrap and the generic helper-mediated state-effect fix.
 
-## What is now in this branch
-- Specialist doctrine, migration map, file-level provenance manifest, campaign protocol, and binary Definition of Done.
-- Initial authorization-specific source modules copied from the source repository: models, interface resolver, Solidity parser/model, AST dataflow evidence, semantic state effects, authorization reasoning, experiment planning/input helpers, planned call rendering, authorization test generation/runtime classification, compiler-state evidence, compiler constraints, Foundry execution helpers, initialization-shape helpers, and constraint candidates.
-- A narrow authorization-only investigation entry point in src/cydra/authorization_pipeline.py; it does not invoke the broad multi-class pipeline.
-- An adapted blind authorization campaign runner with an explicit no-hypothesis failure path and optional causal/reproduction readiness gate.
-- Unit tests and Python regression workflows.
-- Local-only historical positive and protected negative control workflows.
+## Migrated specialist
+- Authorization-only doctrine, migration map, file-level provenance manifest, campaign protocol, and binary Definition of Done.
+- Core model/parser/compiler-evidence/authorization-reasoning/experiment-generation/Foundry modules.
+- Narrow authorization-only investigation entry point and blind campaign runner.
+- Positive and protected negative control runners/workflows.
+- Manual unfamiliar-target workflow requiring explicit program scope, repository, immutable ref, source path, and causal/reproduction gate.
 
 ## Verified evidence
-- Clean-repository Python regression passed at run #38124081424: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38124081424
-- Historical public Decent Bridge positive control passed its benchmark gate at run #38124120474: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38124120474
-  - Blind test detected the known unguarded setRouter state mutation.
-  - Adding the inferred onlyOwner control changed execution from FAIL to PASS.
-  - Independent reproduction and patched reproduction matched; causal verification and reproduction were both true.
-  - This is an existing public issue, not a novel bounty discovery.
-- Protected negative control passed at run #38124212770: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38124212770
-  - The state-gated setWhitelist test executed and classified as not_confirmed.
-- Fresh blind unfamiliar-target replay on Immunefi Vaults Splitter failed closed with zero authorization hypotheses: run #38124305839. The model listed five functions but surfaced no direct state writes and emitted no authorization invariant; no experiment ran. This is NOT_SELECTED / BLOCKED, not evidence of safety. Details: docs/campaigns/2026-10-11-vaults-splitter.md.
-- The unfamiliar-target hypothesis-selection blocker therefore remains open; no novel finding has been established.
+- Initial clean-repository regression: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38124081424
+- Historical public Decent Bridge positive control: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38124120474
+  - Known public unguarded setRouter mutation reproduced.
+  - Causal guard differential and independent reproduction verified.
+  - This is a historical public issue, not a novel discovery.
+- Protected negative control: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38124212770
+  - Executed and classified not_confirmed.
+- First blind unfamiliar-target replay: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38124305839
+  - Zero authorization hypotheses; the initial model failed to surface payable state/helper writes.
+- Generic fix merged in PR #3: https://github.com/Wonderadroit/Cydra_web3/pull/3
+  - Recognizes address payable state declarations.
+  - Propagates writes through same-contract internal call edges with derived-effect evidence.
+  - Regression passed: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38124536823
+- Post-fix Vaults Splitter replay: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38124545350
+  - The model now shows _changeFeeRecipient and changeFeeRecipient write feeRecipient; the public setter has onlyOwner.
+  - Still no authorization hypothesis and no candidate experiment. This target may simply lack a missing-authorization issue.
+- Blind OpenZeppelin ERC7786OpenBridge replay: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38124629642
+  - Official scope pins this asset to commit 0361935dc5edd233adbb9fbae5871ccbb8c739d8.
+  - The model surfaced owner-protected admin methods but did not model addGateway/removeGateway writes through EnumerableSet library calls.
+  - No hypothesis and no experiment; no vulnerability finding.
 
-## Current limitations
-- This is a curated migration, not a claim that every useful capability from the source repository has been moved.
-- Positive and negative controls are demonstrated, but the unfamiliar-target hypothesis-selection blocker remains open.
-- No novel, independently verified bounty finding has been established from this repository.
-- The current Python regression and latest branch checks must remain green before merging.
+## Remaining blocker
+The new repository has working positive and negative control loops, but has not yet demonstrated a hypothesis and executed experiment on a distinct unfamiliar target where the authorization failure actually exists. The latest target failures reveal that helper propagation is now improved, but storage mutations performed through library methods remain incompletely modeled. Do not force a candidate or loosen the finding gate to make a target pass.
 
 ## Next steps
-1. Confirm the latest branch regression after the control runners were added.
-2. Keep the positive and negative controls as mandatory regressions.
-3. Run a fresh blind campaign on a pinned, eligible, unfamiliar target without supplying the expected function.
-4. If it returns no hypothesis or no executed experiment, diagnose that exact stage and fix the reusable cause.
-5. Re-run both controls and the unfamiliar target after each fix.
-6. Do not declare the specialist ready until the Definition of Done is met.
+1. Keep the migrated controls and regression green.
+2. Improve generic modeling of storage-reference/library mutation (for example, EnumerableSet.add/remove), with source-linked provenance and negative controls.
+3. Select another currently eligible target or held-out positive control with an authorization boundary, pin its exact source revision, and keep the expected function hidden.
+4. If the candidate is not selected, inspect the model and source evidence before deciding whether the result is a correct negative or a capability gap.
+5. Require a meaningful executed experiment, protected negative control, causal differential, independent reproduction, and impact evidence before declaring readiness.
