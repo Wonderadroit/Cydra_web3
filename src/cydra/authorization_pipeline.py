@@ -31,8 +31,8 @@ class AuthorizationInvestigation:
     derived_effects: tuple[DerivedWriteEvidence, ...] = ()
 
 
-_FUNCTION_RE = re.compile(r"\\bfunction\\s+(?P<name>[A-Za-z_]\\w*)\\s*\\(")
-_CALL_RE = re.compile(r"\\b([A-Za-z_]\\w*)\\s*\\(")
+_FUNCTION_RE = re.compile(r"\bfunction\s+(?P<name>[A-Za-z_]\w*)\s*\(")
+_CALL_RE = re.compile(r"\b([A-Za-z_]\w*)\s*\(")
 
 
 def _function_body(source: str, function: FunctionModel) -> str:
@@ -40,7 +40,7 @@ def _function_body(source: str, function: FunctionModel) -> str:
     for match in _FUNCTION_RE.finditer(source):
         if match.group("name") != function.name:
             continue
-        if source.count("\\n", 0, match.start()) + 1 != function.line:
+        if source.count("\n", 0, match.start()) + 1 != function.line:
             continue
         opening = source.find("{", match.end())
         semicolon = source.find(";", match.end())
