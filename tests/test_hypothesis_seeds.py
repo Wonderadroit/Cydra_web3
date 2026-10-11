@@ -35,17 +35,22 @@ def test_unresolved_super_dispatch_emits_blocked_generic_seed(tmp_path: Path):
     assert seed.analysis_budget == "direct-call-sites; one-inheritance-level; no-cross-contract-resolution"
 
 
-def test_classified_local_call_without_write_or_lifecycle_does_not_seed(tmp_path: Path):
+def test_resolved_external_call_with_modeled_authorization_does_not_seed(tmp_path: Path):
     source = tmp_path / "Resolved.sol"
     source.write_text(
         "contract Resolved { "
-        "function guardedHelper() internal onlyOwner { manager = manager; } "
-        "function inspect() external { guardedHelper(); } "
-        "address manager; modifier onlyOwner() { _; } }",
+        "function inspect(address registry) external view returns (bool) { return registry.isAllowed(msg.sender); } "
+        "function isAllowed(address actor) external view returns (bool) { return actor != address(0); } }",
         encoding="utf-8",
     )
-    helper = FunctionModel("guardedHelper", "internal", ("onlyOwner",), ("manager",), (), 1, source=str(source))
-    inspect = FunctionModel("inspect", "external", (), (), (), 1, source=str(source))
-    contract = ContractModel("Resolved", str(source), (helper, inspect), state_variables=("manager",))
+    inspect = FunctionModel(
+        "inspect", "external", (), (), (("registry", "isAllowed"),), 1,
+        authorization_predicates=("isAllowed(actor)",), source=str(source),
+    )
+    modeled_callee = FunctionModel(
+        "isAllowed", "external", (), (), (), 1,
+        authorization_predicates=("actor != address(0)",), source=str(source),
+    )
+    contract = ContractModel("Resolved", str(source), (inspect, modeled_callee))
     seeds = generate_hypothesis_seeds((contract,))
     assert all(seed.target_function != "inspect" for seed in seeds)
