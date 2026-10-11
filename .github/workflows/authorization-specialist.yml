@@ -1,0 +1,113 @@
+name: CYDRA Web3 Authorization Specialist
+
+on:
+  push:
+    branches: [main, "migration/**"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      program_url:
+        description: "Exact bounty/program scope URL authorizing this target"
+        required: true
+        type: string
+      target_repo:
+        description: "Authorized target Git repository URL"
+        required: true
+        type: string
+      target_ref:
+        description: "Immutable target commit SHA (preferred) or pinned tag"
+        required: true
+        type: string
+      target_path:
+        description: "Target Solidity source path relative to target repository"
+        required: true
+        type: string
+      target_project:
+        description: "Target project directory relative to repository root (usually .)"
+        required: true
+        default: "."
+        type: string
+      require_ready:
+        description: "Require causal verification and independent reproduction"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  python-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip pytest
+      - run: python -m pip install -e .
+      - run: python -m pytest -q
+
+  blind-authorization-campaign:
+    if: github.event_name == 'workflow_dispatch'
+    needs: python-regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: foundry-rs/foundry-toolchain@v1
+      - run: python -m pip install --upgrade pip pytest
+      - run: python -m pip install -e .
+      - name: Record scope and immutable target intake
+        env:
+          PROGRAM_URL: ${{ inputs.program_url }}
+          TARGET_REPO: ${{ inputs.target_repo }}
+          TARGET_REF: ${{ inputs.target_ref }}
+          TARGET_PATH: ${{ inputs.target_path }}
+          TARGET_PROJECT: ${{ inputs.target_project }}
+        run: |
+          {
+            echo "Program scope URL: $PROGRAM_URL"
+            echo "Target repository: $TARGET_REPO"
+            echo "Target revision: $TARGET_REF"
+            echo "Target source path: $TARGET_PATH"
+            echo "Target project path: $TARGET_PROJECT"
+            echo "Execution: local source checkout and isolated Foundry tests only"
+            echo "External transactions: not performed by this workflow"
+          } | tee "$RUNNER_TEMP/target-intake.txt"
+      - name: Run blind authorization campaign
+        env:
+          PYTHONPATH: src
+          TARGET_REPO: ${{ inputs.target_repo }}
+          TARGET_REF: ${{ inputs.target_ref }}
+          TARGET_PATH: ${{ inputs.target_path }}
+          TARGET_PROJECT: ${{ inputs.target_project }}
+          REQUIRE_READY: ${{ inputs.require_ready }}
+        run: |
+          set -o pipefail
+          args=(
+            --target-repo "$TARGET_REPO"
+            --target-ref "$TARGET_REF"
+            --target-path "$TARGET_PATH"
+            --target-project "$TARGET_PROJECT"
+            --output "$RUNNER_TEMP/authorization-campaign.json"
+          )
+          if [[ "$REQUIRE_READY" == "true" ]]; then
+            args+=(--require-ready)
+          fi
+          python scripts/run_authorization_campaign.py "${args[@]}" 2>&1 | tee "$RUNNER_TEMP/authorization-campaign.log"
+      - name: Upload campaign evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cydra-web3-authorization-campaign
+          path: |
+            ${{ runner.temp }}/target-intake.txt
+            ${{ runner.temp }}/authorization-campaign.json
+            ${{ runner.temp }}/authorization-campaign.log
+          if-no-files-found: warn
+          retention-days: 14
