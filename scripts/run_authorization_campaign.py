@@ -525,6 +525,7 @@ def main() -> int:
                 outcome = classify_authorization_blind_execution(hypothesis, execution)
                 payload = {
                     "target": f"{args.target_repo}@{args.target_ref}:{args.target_path}",
+                    "hypothesis_seeds": _json(getattr(result, "seeds", ())),
                     "hypothesis": _json(hypothesis),
                     "experiment": _json(experiment),
                     "blind_execution": _json(execution),
@@ -555,7 +556,7 @@ def main() -> int:
             )
             if outcome.benchmark_status != args.expected_status:
                 return 2
-            payload={"target":f"{args.target_repo}@{args.target_ref}:{args.target_path}","hypothesis":_json(hypothesis),"experiment":_json(experiment),"blind_execution":_json(execution),"classification":outcome.benchmark_status,"finding_gate":"CONFIRMED_ONLY"}
+            payload={"target":f"{args.target_repo}@{args.target_ref}:{args.target_path}","hypothesis_seeds":_json(getattr(result, "seeds", ())),"hypothesis":_json(hypothesis),"experiment":_json(experiment),"blind_execution":_json(execution),"classification":outcome.benchmark_status,"finding_gate":"CONFIRMED_ONLY"}
             if args.require_ready and outcome.benchmark_status=="confirmed":
                 isolated_source = execution_project / "src" / source_relative
                 auth_context = "\n".join(
