@@ -561,7 +561,7 @@ def _inherited_functions(
         key = (function.name, function.line, function.visibility)
         if key not in seen_keys:
             seen_keys.add(key)
-            deduped.append(function)
+            deduped.append(replace(function, body_scope="out_of_scope"))
     return tuple(deduped)
 
 
