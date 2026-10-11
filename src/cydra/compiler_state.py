@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import posixpath
+import re
 import subprocess
 import tempfile
 import shutil
@@ -28,6 +30,8 @@ class CompilerEvidenceResult:
     build_info_count: int = 0
     matched_source_count: int = 0
     source_ast_found: bool = False
+    source_dependency_count: int = 0
+    unresolved_imports: tuple[str, ...] = ()
 
 
 def _source_keys(payload: dict[str, Any], source: Path, project: Path) -> tuple[tuple[str, dict[str, Any]], ...]:
@@ -48,7 +52,99 @@ def _source_keys(payload: dict[str, Any], source: Path, project: Path) -> tuple[
     return tuple(candidates)
 
 
-def _source_asts(payload: dict[str, Any]) -> tuple[tuple[str, dict[str, Any]], ...]:
+def _project_remappings(project: Path) -> tuple[tuple[str, str], ...]:
+    mappings: list[tuple[str, str]] = []
+    for path in (project / "remappings.txt", project / "foundry.toml"):
+        try:
+            source = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            continue
+        for raw in source.splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            candidates = [line] if "=" in line and not line.startswith("[") else []
+            if path.name == "foundry.toml":
+                candidates.extend(re.findall(r"['\\\"]([^'\\\"]+=[^'\\\"]+)['\\\"]", line))
+            for candidate in candidates:
+                prefix, target = candidate.split("=", 1)
+                if prefix and target:
+                    mappings.append((prefix, target))
+    return tuple(sorted(set(mappings), key=lambda item: len(item[0]), reverse=True))
+
+
+def _source_dependency_closure(
+    payload: dict[str, Any], source: Path, project: Path
+) -> tuple[set[str], tuple[str, ...]]:
+    """Return the exact source/import closure for the requested entry AST."""
+    output = payload.get("output")
+    sources = output.get("sources") if isinstance(output, dict) else None
+    input_payload = payload.get("input")
+    input_sources = input_payload.get("sources") if isinstance(input_payload, dict) else None
+    if not isinstance(sources, dict):
+        return set(), ()
+    relative = os.path.relpath(source.resolve(), project.resolve()).replace(os.sep, "/")
+    keys = {key.replace("\\\\", "/") for key in sources if isinstance(key, str)}
+    starts = {
+        key for key in keys
+        if key == relative or key.endswith("/" + relative)
+    }
+    if not starts:
+        return set(), ()
+    remappings = _project_remappings(project)
+    import_re = re.compile(r"\\bimport\\s+(?:[^;]*?\\s+from\\s+)?['\\\"]([^'\\\"]+)['\\\"]\\s*;", re.DOTALL)
+    closure: set[str] = set()
+    unresolved: set[str] = set()
+    pending = list(starts)
+
+    def content_for(key: str) -> str:
+        item = input_sources.get(key) if isinstance(input_sources, dict) else None
+        if isinstance(item, dict) and isinstance(item.get("content"), str):
+            return item["content"]
+        candidate = project / key
+        try:
+            return candidate.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            return ""
+
+    def resolve(importer: str, spec: str) -> str | None:
+        candidates: list[str] = []
+        if spec.startswith("."):
+            candidates.append(posixpath.normpath(posixpath.join(posixpath.dirname(importer), spec)))
+        candidates.append(spec)
+        for prefix, target in remappings:
+            if spec.startswith(prefix):
+                mapped = target + spec[len(prefix):]
+                candidates.extend((mapped, posixpath.join("node_modules", mapped)))
+        candidates.append(posixpath.join("node_modules", spec))
+        normalized = [item.replace("\\\\", "/") for item in candidates]
+        for candidate in normalized:
+            if candidate in keys:
+                return candidate
+        for candidate in normalized:
+            matches = [key for key in keys if key.endswith("/" + candidate)]
+            if len(matches) == 1:
+                return matches[0]
+        # Some compiler inputs retain the bare import path while filesystem-based
+        # resolution sees the package under node_modules; only accept unique matches.
+        matches = [key for key in keys if key.endswith("/" + spec)]
+        return matches[0] if len(matches) == 1 else None
+
+    while pending:
+        importer = pending.pop()
+        if importer in closure:
+            continue
+        closure.add(importer)
+        for spec in import_re.findall(content_for(importer)):
+            resolved = resolve(importer, spec)
+            if resolved is None:
+                unresolved.add(f"{importer}: {spec}")
+            elif resolved not in closure:
+                pending.append(resolved)
+    return closure, tuple(sorted(unresolved))
+
+
+def _source_asts(payload: dict[str, Any], source_allowlist: set[str] | None = None) -> tuple[tuple[str, dict[str, Any]], ...]:
     """Return every compiler AST in this build unit, including imported base contracts.
 
     Authorization effects often live in inherited contracts rather than the concrete
@@ -63,15 +159,18 @@ def _source_asts(payload: dict[str, Any]) -> tuple[tuple[str, dict[str, Any]], .
         (key, source_payload["ast"])
         for key, source_payload in sources.items()
         if isinstance(key, str)
+        and (source_allowlist is None or key in source_allowlist)
         and isinstance(source_payload, dict)
         and isinstance(source_payload.get("ast"), dict)
     )
 
 
-def extract_state_effects_from_build_info(build_info: Path, source: Path, project: Path) -> tuple[SemanticRelationshipEvidence, ...]:
+def extract_state_effects_from_build_info(
+    build_info: Path, source: Path, project: Path, source_allowlist: set[str] | None = None
+) -> tuple[SemanticRelationshipEvidence, ...]:
     payload = json.loads(build_info.read_text(encoding="utf-8"))
     evidence: list[SemanticRelationshipEvidence] = []
-    for source_key, ast in _source_asts(payload):
+    for source_key, ast in _source_asts(payload, source_allowlist):
         evidence.extend(extract_ast_relationships(ast, source_key))
     # A project can emit multiple build-info records that repeat imported sources.
     unique: dict[tuple[Any, ...], SemanticRelationshipEvidence] = {}
@@ -82,10 +181,12 @@ def extract_state_effects_from_build_info(build_info: Path, source: Path, projec
     return tuple(unique.values())
 
 
-def extract_constraints_from_build_info(build_info: Path, source: Path, project: Path) -> tuple[ConstraintEvidence, ...]:
+def extract_constraints_from_build_info(
+    build_info: Path, source: Path, project: Path, source_allowlist: set[str] | None = None
+) -> tuple[ConstraintEvidence, ...]:
     payload = json.loads(build_info.read_text(encoding="utf-8"))
     evidence: list[ConstraintEvidence] = []
-    source_asts = _source_asts(payload)
+    source_asts = _source_asts(payload, source_allowlist)
     declarations = collect_ast_declarations([ast for _, ast in source_asts])
     for source_key, ast in source_asts:
         evidence.extend(extract_parameter_constraints(ast, source_key, declarations))
@@ -193,14 +294,21 @@ def _compile_hardhat_state_effects(project_path: Path, source_path: Path) -> Com
     matched_source_count, source_ast_found = _build_info_ast_diagnostics(
         build_files, source_path, project_path
     )
+    dependency_sources: set[str] = set()
+    unresolved_imports: set[str] = set()
     for build_file in build_files:
         try:
             payload = json.loads(build_file.read_text(encoding="utf-8"))
             version = payload.get("solcVersion")
             if isinstance(version, str):
                 versions.add(version)
-            evidence.extend(extract_state_effects_from_build_info(build_file, source_path, project_path))
-            constraints.extend(extract_constraints_from_build_info(build_file, source_path, project_path))
+            allowlist, unresolved = _source_dependency_closure(payload, source_path, project_path)
+            if not allowlist:
+                continue
+            dependency_sources.update(allowlist)
+            unresolved_imports.update(unresolved)
+            evidence.extend(extract_state_effects_from_build_info(build_file, source_path, project_path, allowlist))
+            constraints.extend(extract_constraints_from_build_info(build_file, source_path, project_path, allowlist))
         except (OSError, json.JSONDecodeError):
             continue
     # Hardhat may produce multiple build-info records that repeat dependency ASTs.
@@ -224,6 +332,7 @@ def _compile_hardhat_state_effects(project_path: Path, source_path: Path) -> Com
         tuple(unique_evidence.values()), unique_constraints, True, status, compile_command,
         stdout, stderr, tuple(map(str, build_files)), tuple(sorted(versions)),
         len(build_files), matched_source_count, source_ast_found,
+        len(dependency_sources), tuple(sorted(unresolved_imports)),
     )
 
 
@@ -274,14 +383,21 @@ def compile_state_effects(project: str | Path, source: str | Path) -> CompilerEv
         matched_source_count, source_ast_found = _build_info_ast_diagnostics(
             build_files, source_path, project_path
         )
+        dependency_sources: set[str] = set()
+        unresolved_imports: set[str] = set()
         for build_file in build_files:
             try:
                 payload = json.loads(build_file.read_text(encoding="utf-8"))
                 version = payload.get("solcVersion")
                 if isinstance(version, str):
                     versions.add(version)
-                evidence.extend(extract_state_effects_from_build_info(build_file, source_path, project_path))
-                constraints.extend(extract_constraints_from_build_info(build_file, source_path, project_path))
+                allowlist, unresolved = _source_dependency_closure(payload, source_path, project_path)
+                if not allowlist:
+                    continue
+                dependency_sources.update(allowlist)
+                unresolved_imports.update(unresolved)
+                evidence.extend(extract_state_effects_from_build_info(build_file, source_path, project_path, allowlist))
+                constraints.extend(extract_constraints_from_build_info(build_file, source_path, project_path, allowlist))
             except (OSError, json.JSONDecodeError):
                 continue
         if not build_files:
@@ -298,5 +414,5 @@ def compile_state_effects(project: str | Path, source: str | Path) -> CompilerEv
             tuple(evidence), tuple(constraints), True, status, command,
             completed.stdout, completed.stderr, tuple(map(str, build_files)),
             tuple(sorted(versions)), len(build_files), matched_source_count,
-            source_ast_found,
+            source_ast_found, len(dependency_sources), tuple(sorted(unresolved_imports)),
         )
