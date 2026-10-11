@@ -83,3 +83,18 @@ The parser now models direct writes, same-contract helper-mediated writes, payab
 - The model only evidenced the entry contract's local functions; inherited meta-transaction execution and downstream external-effect authorization were not validated.
 - The pinned commit was observed in a public Settler GitCommit event, but the current eligible deployed revision must be verified before bounty reporting.
 - Next capability closure: trace inherited function and caller/signer authorization through the meta-transaction path, with local positive/negative signature controls.
+
+
+## Inherited-super authorization modeling and Settler replay — 2026-10-11
+
+- PR #13 merged: https://github.com/Wonderadroit/Cydra_web3/pull/13
+- Merge commit: `fe405c3974936aa58c0a3f3456c59d5321374586`
+- Python Regression passed: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38144206754
+- Authorization Specialist regression passed: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38144206779
+- Added paired tests for inherited modifiers on explicit `super.<function>(...)` dispatch and for an unguarded override that does not dispatch to `super`.
+- Post-change held-out Settler replay: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38144275019
+- Replay artifact: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38144275019/artifacts/11704470406
+- The replay still produced zero authorization hypotheses and zero candidate experiments; disposition remains BLOCKED / NOT_READY. The target-level campaign artifact does not yet expose effective inherited modifier provenance or the downstream Permit2 witness/signature path.
+- Source-path review indicates `executeMetaTxn` dispatches through inherited meta-transaction logic and a witness-aware Permit2 action. This is static context only, not an independently executed security proof.
+- Full report: `docs/campaigns/2026-10-11-0x-settler-post-super.md`.
+- Next capability closure: inherited provenance in artifacts; end-to-end signer/payer/witness call-path modeling; paired valid/invalid signature execution controls. No finding or security pass is claimed.
