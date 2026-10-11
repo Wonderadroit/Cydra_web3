@@ -79,6 +79,20 @@ jobs:
             echo "Execution: local source checkout and isolated Foundry tests only"
             echo "External transactions: not performed by this workflow"
           } | tee "$RUNNER_TEMP/target-intake.txt"
+      - name: Validate campaign intake format
+        env:
+          PROGRAM_URL: ${{ inputs.program_url }}
+          TARGET_REPO: ${{ inputs.target_repo }}
+          TARGET_REF: ${{ inputs.target_ref }}
+          TARGET_PATH: ${{ inputs.target_path }}
+          TARGET_PROJECT: ${{ inputs.target_project }}
+        run: |
+          python scripts/validate_campaign_intake.py \\
+            --program-url "$PROGRAM_URL" \\
+            --target-repo "$TARGET_REPO" \\
+            --target-ref "$TARGET_REF" \\
+            --target-path "$TARGET_PATH" \\
+            --target-project "$TARGET_PROJECT"
       - name: Run blind authorization campaign
         env:
           PYTHONPATH: src
