@@ -17,6 +17,7 @@ Read PROJECT_BIBLE.md before making changes.
 - Analysis budget for provisional authorization seeds: direct call sites and at most one inheritance level. Do not build a recursive/interprocedural resolver or resolve cross-contract implementations in this milestone.
 - A direct call site is unresolved when the model cannot classify its callee's security-relevant effects or authorization behavior within that budget. Either unknown is sufficient to produce a blocked seed.
 - An externally callable function with a state write, lifecycle-sensitive behavior, or an unresolved security-relevant execution path must not be silently omitted. An unresolved path produces a blocked seed and records the call site as provenance.
+- Inherited declarations are context only unless their bodies are in the selected analysis scope. Record out-of-scope inherited bodies explicitly; do not load/resolve their implementations just to avoid a blocked seed.
 - Every seed records invariant_source as derived (supported by target model evidence) or generic (doctrine-level invariant used because target-specific semantics are not established). Never phrase a generic invariant as a target-derived fact.
 - A resolved call alone is not a reason to seed. Preserve negative controls so classified calls do not create noise.
 - View/pure functions that may disclose security-sensitive state or influence external decisions are out of scope for this authorization state-transition milestone; do not silently treat this exclusion as a security guarantee.
