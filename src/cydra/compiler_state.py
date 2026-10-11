@@ -179,8 +179,8 @@ def _compile_hardhat_state_effects(project_path: Path, source_path: Path) -> Com
         compile_command, cwd=project_path, text=True, capture_output=True, check=False
     )
     build_files = tuple(sorted(build_info_root.rglob("*.json")))
-    stdout = installed.stdout + "\\n" + completed.stdout
-    stderr = installed.stderr + "\\n" + completed.stderr
+    stdout = installed.stdout + "\n" + completed.stdout
+    stderr = installed.stderr + "\n" + completed.stderr
     if completed.returncode != 0:
         return CompilerEvidenceResult(
             (), (), True, "compile_failed", compile_command, stdout, stderr,
@@ -210,7 +210,9 @@ def _compile_hardhat_state_effects(project_path: Path, source_path: Path) -> Com
                item.function_ast_node_id, item.target_ast_node_id, item.source_location)
         unique_evidence.setdefault(key, item)
     unique_constraints = tuple(dict.fromkeys(constraints))
-    if unique_evidence or unique_constraints:
+    if not build_files:
+        status = "no_build_info_artifacts"
+    elif unique_evidence or unique_constraints:
         status = "success"
     elif source_ast_found:
         status = "ast_present_no_supported_evidence"
