@@ -30,7 +30,7 @@ _STATE_COMPARISON_RE = re.compile(
 )
 _STATE_DECLARATION_RE = re.compile(
     r"^\s*(?P<type>mapping\s*\([^;]+\)|[A-Za-z_]\w*(?:\s*\[[^\]]*\])*)\s+"
-    r"(?:(?:public|private|internal|external|constant|immutable|transient|override|virtual)\s+)*"
+    r"(?:(?:public|private|internal|external|constant|immutable|transient|override|virtual|payable)\s+)*"
     r"(?P<name>[A-Za-z_]\w*)\s*(?:=.*)?$"
 )
 _STATE_DECLARATION_KEYWORDS = {
