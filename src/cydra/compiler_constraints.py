@@ -22,6 +22,7 @@ class ConstraintEvidence:
     ast_node_id: int | None = None
     source_location: tuple[int, int, int] | None = None
     kind: str = "precondition"
+    context_kind: str = "function"
 
 
 def _walk(node: Any) -> Iterator[dict[str, Any]]:
@@ -109,7 +110,54 @@ def _contains_parameter(node: Any, parameter_ids: set[int]) -> bool:
                for item in _walk(node))
 
 
-def _constraint_nodes(function: dict[str, Any]) -> Iterator[tuple[dict[str, Any], str]]:
+def _is_reverting_helper(
+    function_id: int,
+    declarations: dict[int, dict[str, Any]],
+    seen: set[int] | None = None,
+) -> bool:
+    """Resolve a direct helper call only when its body contains an explicit revert path."""
+    visited = set() if seen is None else set(seen)
+    if function_id in visited:
+        return False
+    visited.add(function_id)
+    function = declarations.get(function_id)
+    body = function.get("body") if isinstance(function, dict) else None
+    if not isinstance(body, dict):
+        return False
+    for node in _walk(body):
+        if node.get("nodeType") in {"RevertStatement", "Throw"}:
+            return True
+        if node.get("nodeType") == "YulFunctionCall":
+            function_name = node.get("functionName")
+            if isinstance(function_name, dict) and function_name.get("name") == "revert":
+                return True
+        if node.get("nodeType") == "FunctionCall":
+            expression = node.get("expression")
+            target_id = expression.get("referencedDeclaration") if isinstance(expression, dict) else None
+            if isinstance(target_id, int) and _is_reverting_helper(target_id, declarations, visited):
+                return True
+    return False
+
+
+def _branch_reverts(node: Any, declarations: dict[int, dict[str, Any]]) -> bool:
+    for item in _walk(node):
+        if item.get("nodeType") in {"RevertStatement", "Throw"}:
+            return True
+        if item.get("nodeType") == "YulFunctionCall":
+            function_name = item.get("functionName")
+            if isinstance(function_name, dict) and function_name.get("name") == "revert":
+                return True
+        if item.get("nodeType") == "FunctionCall":
+            expression = item.get("expression")
+            target_id = expression.get("referencedDeclaration") if isinstance(expression, dict) else None
+            if isinstance(target_id, int) and _is_reverting_helper(target_id, declarations):
+                return True
+    return False
+
+
+def _constraint_nodes(
+    function: dict[str, Any], declarations: dict[int, dict[str, Any]]
+) -> Iterator[tuple[dict[str, Any], str]]:
     body = function.get("body")
     if not isinstance(body, dict):
         return
@@ -124,7 +172,7 @@ def _constraint_nodes(function: dict[str, Any]) -> Iterator[tuple[dict[str, Any]
             condition = node.get("condition")
             true_body = node.get("trueBody")
             if isinstance(condition, dict) and isinstance(true_body, dict):
-                if any(item.get("nodeType") in {"RevertStatement", "Throw"} for item in _walk(true_body)):
+                if _branch_reverts(true_body, declarations):
                     yield condition, "revert_guard"
 
 
@@ -137,7 +185,8 @@ def extract_parameter_constraints(ast: dict[str, Any], file: str) -> tuple[Const
     declarations = {node.get("id"): node for node in _walk(ast) if isinstance(node.get("id"), int)}
     evidence: list[ConstraintEvidence] = []
     for function in _walk(ast):
-        if function.get("nodeType") != "FunctionDefinition":
+        context_kind = function.get("nodeType")
+        if context_kind not in {"FunctionDefinition", "ModifierDefinition"}:
             continue
         function_id = function.get("id")
         if not isinstance(function_id, int):
@@ -152,7 +201,7 @@ def extract_parameter_constraints(ast: dict[str, Any], file: str) -> tuple[Const
         function_name = function.get("name") or function.get("kind") or "anonymous"
         if not isinstance(function_name, str):
             function_name = "anonymous"
-        for predicate_node, kind in _constraint_nodes(function):
+        for predicate_node, kind in _constraint_nodes(function, declarations):
             if not _contains_parameter(predicate_node, parameter_ids):
                 continue
             predicate = _expr(predicate_node, names)
@@ -167,5 +216,6 @@ def extract_parameter_constraints(ast: dict[str, Any], file: str) -> tuple[Const
                     parameter_index=index, predicate=predicate, source=f"solc-json-ast:{file}",
                     ast_node_id=predicate_node.get("id") if isinstance(predicate_node.get("id"), int) else None,
                     source_location=_location(predicate_node), kind=kind,
+                    context_kind="modifier" if context_kind == "ModifierDefinition" else "function",
                 ))
     return tuple(evidence)
