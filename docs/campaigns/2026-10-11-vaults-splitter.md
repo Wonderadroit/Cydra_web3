@@ -37,7 +37,7 @@ Do not add a Splitter-specific exception or hardcode a function name. The next s
 - Fix PR: https://github.com/Wonderadroit/Cydra_web3/pull/3 (merged)
 - Regression: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38124536823 (passed)
 - Post-fix replay: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38124545350
-- Post-fix artifact: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38124545350/artifacts/11696984511
+- Post-fix artifact: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38124545350/artifacts/11696084113
 
 The parser now recognizes the mutable payable state variable, and the authorization model propagates the internal helper write to the externally callable wrapper. The replay log shows:
 
