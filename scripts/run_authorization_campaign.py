@@ -448,7 +448,7 @@ def main() -> int:
                 payload["finding_gate"] = "NOT_READY"
                 if args.output:
                     args.output.parent.mkdir(parents=True, exist_ok=True)
-                    args.output.write_text(json.dumps(_json(payload), indent=2) + "\\n", encoding="utf-8")
+                    args.output.write_text(json.dumps(_json(payload), indent=2) + "\n", encoding="utf-8")
                 print("SEED_COVERAGE", len(result.seeds), "measurement=PASS", "finding_gate=NOT_READY")
                 return 0
             if args.allow_no_hypothesis:
