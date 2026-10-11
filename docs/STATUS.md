@@ -62,3 +62,25 @@ The library-mediated storage gap has a generic regression fix in PR #6: qualifie
 
 ## Current readiness
 The parser now models direct writes, same-contract helper-mediated writes, payable state declarations, and common collection mutators on qualified state types. Positive and negative controls pass. The specialist still has not demonstrated a novel or held-out unfamiliar-target authorization finding; the next milestone is a held-out positive control or a currently eligible target with a genuine authorization boundary failure, tested blind.
+
+
+## Campaign intake hardening — 2026-10-11
+
+- PR #10 merged: https://github.com/Wonderadroit/Cydra_web3/pull/10
+- Main commit: 40908f806392aece517d7228e66ade028aae84ed
+- Python Regression passed on PR head: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38126024438
+- Authorization Specialist workflow's Python regression passed: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38126024415
+- Added input-format checks for HTTPS URLs, canonical GitHub owner/repository URLs, full 40-character commit SHAs, and safe relative paths.
+- The manual campaign workflow now runs this validation before target analysis.
+- Scope caveat is explicit: syntax validation does not independently establish that a repository, source path, or deployed revision is covered by a bounty program.
+
+## Held-out 0x Settler campaign — pending measurement
+
+- Official program scope: https://immunefi.com/bug-bounty/0x/scope/
+- Public source repository: https://github.com/0xProject/0x-settler
+- Pinned source revision for the isolated measurement: 872b0e4cc83cce6a75eb4a1705f5bfd06e21a6c5
+- Source entry point: src/chains/Mainnet/Intent.sol
+- Dedicated workflow: .github/workflows/heldout-0x-settler.yml on branch campaigns/held-out-0x-settler
+- This revision appeared in a public Settler deployment GitCommit event, but the current registry owner/previous deployment must be checked before treating this exact revision as the current bounty-reporting target.
+- The workflow is local-source-only, has read-only repository permissions, records no-hypothesis outcomes without calling them secure, and keeps the readiness gate enabled.
+- Result is pending verification; no finding or unfamiliar-target capability claim is made from workflow creation alone.
