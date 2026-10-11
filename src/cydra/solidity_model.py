@@ -722,6 +722,7 @@ def parse_solidity(path: str | Path, *, include_inherited: bool = True) -> tuple
                     execution_predicate_polarities=_execution_predicate_polarities(body, state_variables),
                     execution_value_bindings=_execution_value_bindings(body),
                     return_expressions=_return_expressions(body),
+                    source=str(path.resolve()),
                 )
             )
 
