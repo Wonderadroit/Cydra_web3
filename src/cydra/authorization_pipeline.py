@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .ast_dataflow import SemanticRelationshipEvidence
 from .models import ContractModel, Experiment, FunctionModel, Hypothesis, Invariant
+from .hypothesis_seeds import HypothesisSeed, generate_hypothesis_seeds
 from .reasoning import generate_access_control_hypotheses, plan_access_control_experiment
 from .solidity_model import _strip_comments, parse_solidity
 
@@ -29,6 +30,7 @@ class AuthorizationInvestigation:
     experiments: tuple[Experiment, ...]
     status: str
     derived_effects: tuple[DerivedWriteEvidence, ...] = ()
+    seeds: tuple[HypothesisSeed, ...] = ()
 
 
 _FUNCTION_RE = re.compile(r"\bfunction\s+(?P<name>[A-Za-z_]\w*)\s*\(")
@@ -145,6 +147,10 @@ def investigate_authorization(
         modeled.append(enriched)
         derived.extend(effects)
 
+    # Seeds are a separate pre-proof artifact; do not derive their existence from
+    # whether the narrower exploit-candidate filter emits a hypothesis.
+    seeds = generate_hypothesis_seeds(tuple(modeled))
+
     hypotheses: list[Hypothesis] = []
     for contract in modeled:
         hypotheses.extend(generate_access_control_hypotheses(contract, semantic_evidence))
@@ -165,4 +171,5 @@ def investigate_authorization(
         experiments=experiments,
         status="HYPOTHESES_READY" if ordered else "NO_AUTH_HYPOTHESIS",
         derived_effects=tuple(derived),
+        seeds=seeds,
     )
