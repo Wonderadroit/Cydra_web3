@@ -1,0 +1,53 @@
+name: CYDRA held-out 0x Settler authorization campaign
+
+on:
+  push:
+    branches: ["campaigns/held-out-0x-settler"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  held-out-authorization-campaign:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: foundry-rs/foundry-toolchain@v1
+      - run: python -m pip install --upgrade pip pytest
+      - run: python -m pip install -e .
+      - name: Validate pinned campaign intake
+        run: |
+          python scripts/validate_campaign_intake.py \
+            --program-url "https://immunefi.com/bug-bounty/0x/scope/" \
+            --target-repo "https://github.com/0xProject/0x-settler" \
+            --target-ref "872b0e4cc83cce6a75eb4a1705f5bfd06e21a6c5" \
+            --target-path "src/chains/Mainnet/Intent.sol" \
+            --target-project "."
+      - name: Run blind campaign against pinned source
+        env:
+          PYTHONPATH: src
+        run: |
+          set -o pipefail
+          python scripts/run_authorization_campaign.py \
+            --target-repo "https://github.com/0xProject/0x-settler" \
+            --target-ref "872b0e4cc83cce6a75eb4a1705f5bfd06e21a6c5" \
+            --target-path "src/chains/Mainnet/Intent.sol" \
+            --target-project "." \
+            --allow-no-hypothesis \
+            --require-ready \
+            --output "$RUNNER_TEMP/authorization-campaign.json" 2>&1 | tee "$RUNNER_TEMP/authorization-campaign.log"
+      - name: Upload campaign evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cydra-heldout-0x-settler-authorization
+          path: |
+            ${{ runner.temp }}/authorization-campaign.json
+            ${{ runner.temp }}/authorization-campaign.log
+          if-no-files-found: warn
+          retention-days: 30
