@@ -65,7 +65,7 @@ def _project_remappings(project: Path) -> tuple[tuple[str, str], ...]:
                 continue
             candidates = [line] if "=" in line and not line.startswith("[") else []
             if path.name == "foundry.toml":
-                candidates.extend(re.findall(r"['\\\"]([^'\\\"]+=[^'\\\"]+)['\\\"]", line))
+                candidates.extend(re.findall(r"""['"]([^'"]+=[^'"]+)['"]""", line))
             for candidate in candidates:
                 prefix, target = candidate.split("=", 1)
                 if prefix and target:
@@ -84,7 +84,7 @@ def _source_dependency_closure(
     if not isinstance(sources, dict):
         return set(), ()
     relative = os.path.relpath(source.resolve(), project.resolve()).replace(os.sep, "/")
-    keys = {key.replace("\\\\", "/") for key in sources if isinstance(key, str)}
+    keys = {key.replace("\\", "/") for key in sources if isinstance(key, str)}
     starts = {
         key for key in keys
         if key == relative or key.endswith("/" + relative)
@@ -92,7 +92,7 @@ def _source_dependency_closure(
     if not starts:
         return set(), ()
     remappings = _project_remappings(project)
-    import_re = re.compile(r"\\bimport\\s+(?:[^;]*?\\s+from\\s+)?['\\\"]([^'\\\"]+)['\\\"]\\s*;", re.DOTALL)
+    import_re = re.compile(r"""\bimport\s+(?:[^;]*?\s+from\s+)?['"]([^'"]+)['"]\s*;""", re.DOTALL)
     closure: set[str] = set()
     unresolved: set[str] = set()
     pending = list(starts)
@@ -117,7 +117,7 @@ def _source_dependency_closure(
                 mapped = target + spec[len(prefix):]
                 candidates.extend((mapped, posixpath.join("node_modules", mapped)))
         candidates.append(posixpath.join("node_modules", spec))
-        normalized = [item.replace("\\\\", "/") for item in candidates]
+        normalized = [item.replace("\\", "/") for item in candidates]
         for candidate in normalized:
             if candidate in keys:
                 return candidate
