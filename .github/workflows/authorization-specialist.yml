@@ -87,11 +87,11 @@ jobs:
           TARGET_PATH: ${{ inputs.target_path }}
           TARGET_PROJECT: ${{ inputs.target_project }}
         run: |
-          python scripts/validate_campaign_intake.py \\
-            --program-url "$PROGRAM_URL" \\
-            --target-repo "$TARGET_REPO" \\
-            --target-ref "$TARGET_REF" \\
-            --target-path "$TARGET_PATH" \\
+          python scripts/validate_campaign_intake.py \
+            --program-url "$PROGRAM_URL" \
+            --target-repo "$TARGET_REPO" \
+            --target-ref "$TARGET_REF" \
+            --target-path "$TARGET_PATH" \
             --target-project "$TARGET_PROJECT"
       - name: Run blind authorization campaign
         env:
