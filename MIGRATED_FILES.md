@@ -27,10 +27,12 @@ Every file listed below was copied from Wonderadroit/Cydra_wonder at source comm
 
 - src/cydra/authorization_pipeline.py — narrow wrapper that runs only authorization hypothesis generation.
 - scripts/run_authorization_campaign.py — adapted blind runner; imports the new authorization-only entry point instead of the broad multi-class pipeline.
+- scripts/run_authorization_negative_control.py — adapted runner for the pinned protected control fixture.
 - tests/test_authorization_pipeline.py — initial tests for hypothesis scope and explicit no-hypothesis outcomes.
 - .github/workflows/python-regression.yml — fresh-repository Python regression.
 - .github/workflows/authorization-specialist.yml — manual authorized-target campaign with required scope intake and explicit readiness gate.
 - .github/workflows/authorization-positive-control.yml — local-only historical positive-control replay.
+- .github/workflows/authorization-negative-control.yml — pinned protected negative-control replay.
 
 ## Deliberately not copied wholesale
 
