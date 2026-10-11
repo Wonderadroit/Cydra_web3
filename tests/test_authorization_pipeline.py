@@ -43,15 +43,15 @@ def test_no_hypothesis_is_not_reported_as_secure(tmp_path: Path):
 def test_payable_state_and_helper_mediated_writer_are_modeled(tmp_path: Path):
     source = tmp_path / "HelperTarget.sol"
     source.write_text(
-        "pragma solidity ^0.8.20;\\n"
-        "contract HelperTarget {\\n"
-        "  address public owner;\\n"
-        "  address payable public treasury;\\n"
-        "  modifier onlyOwner() { require(msg.sender == owner, 'owner'); _; }\\n"
-        "  function _writeTreasury(address payable next) internal { treasury = next; }\\n"
-        "  function setTreasury(address payable next) external { _writeTreasury(next); }\\n"
-        "  function adminTreasury(address payable next) external onlyOwner { _writeTreasury(next); }\\n"
-        "}\\n",
+        "pragma solidity ^0.8.20;\n"
+        "contract HelperTarget {\n"
+        "  address public owner;\n"
+        "  address payable public treasury;\n"
+        "  modifier onlyOwner() { require(msg.sender == owner, 'owner'); _; }\n"
+        "  function _writeTreasury(address payable next) internal { treasury = next; }\n"
+        "  function setTreasury(address payable next) external { _writeTreasury(next); }\n"
+        "  function adminTreasury(address payable next) external onlyOwner { _writeTreasury(next); }\n"
+        "}\n",
         encoding="utf-8",
     )
 
