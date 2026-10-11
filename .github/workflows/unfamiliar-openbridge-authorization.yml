@@ -3,7 +3,7 @@ name: Blind Unfamiliar Authorization Benchmark - OpenBridge
 on:
   push:
     branches:
-      - "campaign/unfamiliar-authorization-openbridge"
+      - "campaign/unfamiliar-authorization-openbridge*"
   workflow_dispatch:
 
 permissions:
