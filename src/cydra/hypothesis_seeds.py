@@ -88,8 +88,12 @@ def _unresolved_execution_path(
     to one modeled level; cross-contract calls remain unresolved by definition.
     """
     body = _function_body(function, contract)
+    if function.body_scope == "out_of_scope":
+        return (f"inherited_body_out_of_scope:{function.source or contract.source}::{function.name}",)
     if body is None:
-        return tuple(f"model_call:{call}:source_body_unavailable" for call in function.external_calls)
+        return (f"source_body_unavailable:{function.source or contract.source}::{function.name}",) + tuple(
+            f"model_call:{call}:source_body_unavailable" for call in function.external_calls
+        )
 
     unresolved: list[str] = []
     local = {item.name: item for item in contract.functions}
@@ -97,8 +101,11 @@ def _unresolved_execution_path(
     for match in re.finditer(r"\bsuper\.(\w+)\s*\(", body):
         name = match.group(1)
         callee = inherited.get(name)
-        if callee is None or not (callee.writes or callee.modifiers or callee.authorization_predicates):
-            unresolved.append(f"super.{name}:callee_effect_or_authorization_unclassified")
+        if callee is None or callee.body_scope == "out_of_scope" or not (
+            callee.writes or callee.modifiers or callee.authorization_predicates
+        ):
+            source = callee.source if callee is not None and callee.source else contract.source
+            unresolved.append(f"super.{name}:inherited_body_out_of_scope:{source}::{name}")
 
     excluded = {
         "require", "assert", "revert", "if", "while", "for", "return", "emit",
