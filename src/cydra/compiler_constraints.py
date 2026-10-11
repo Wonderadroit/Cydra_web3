@@ -176,13 +176,27 @@ def _constraint_nodes(
                     yield condition, "revert_guard"
 
 
-def extract_parameter_constraints(ast: dict[str, Any], file: str) -> tuple[ConstraintEvidence, ...]:
+def collect_ast_declarations(asts: list[dict[str, Any]] | tuple[dict[str, Any], ...]) -> dict[int, dict[str, Any]]:
+    """Collect declaration nodes across a compiler build unit for cross-source helper resolution."""
+    return {
+        node["id"]: node
+        for ast in asts
+        for node in _walk(ast)
+        if isinstance(node.get("id"), int)
+    }
+
+
+def extract_parameter_constraints(
+    ast: dict[str, Any], file: str,
+    external_declarations: dict[int, dict[str, Any]] | None = None,
+) -> tuple[ConstraintEvidence, ...]:
     """Extract compiler-linked predicates that constrain function inputs.
 
     Only predicates that reference a declared parameter are emitted. The extractor
     deliberately preserves the predicate rather than guessing an allowed domain.
     """
-    declarations = {node.get("id"): node for node in _walk(ast) if isinstance(node.get("id"), int)}
+    declarations = dict(external_declarations or {})
+    declarations.update({node.get("id"): node for node in _walk(ast) if isinstance(node.get("id"), int)})
     evidence: list[ConstraintEvidence] = []
     for function in _walk(ast):
         context_kind = function.get("nodeType")
