@@ -98,3 +98,14 @@ The parser now models direct writes, same-contract helper-mediated writes, payab
 - Source-path review indicates `executeMetaTxn` dispatches through inherited meta-transaction logic and a witness-aware Permit2 action. This is static context only, not an independently executed security proof.
 - Full report: `docs/campaigns/2026-10-11-0x-settler-post-super.md`.
 - Next capability closure: inherited provenance in artifacts; end-to-end signer/payer/witness call-path modeling; paired valid/invalid signature execution controls. No finding or security pass is claimed.
+
+
+## Campaign artifact inheritance provenance — 2026-10-11
+
+- PR #15 merged: https://github.com/Wonderadroit/Cydra_web3/pull/15
+- Merge commit: `c7137fc74542a7d6c80d67ff722826b5ca822858`
+- Python Regression passed on the merged change's head: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38144670120
+- Authorization Specialist regression passed on the merged change's head: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38144670119
+- Campaign artifacts now include inherited public/external function coverage, declaring-source paths, and declared versus effective modifier provenance. A regression verifies that explicit super dispatch can expose inherited modifier evidence without fabricating a hypothesis.
+- Post-change held-out replay is running: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38144714579
+- The prior replay remained BLOCKED / NOT_READY with zero hypotheses and zero candidate experiments. The provenance replay must be inspected before claiming this gap is closed.
