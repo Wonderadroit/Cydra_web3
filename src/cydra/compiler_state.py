@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import tempfile
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -116,8 +117,96 @@ def _has_lite_profile(project: Path) -> bool:
         return False
 
 
+def _is_hardhat_project(project: Path) -> bool:
+    return (project / "package.json").is_file() and any(
+        (project / name).is_file()
+        for name in ("hardhat.config.js", "hardhat.config.ts", "hardhat.config.cjs")
+    )
+
+
+def _hardhat_commands(project: Path) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    if (project / "yarn.lock").is_file():
+        return (
+            ("yarn", "install", "--frozen-lockfile", "--non-interactive", "--ignore-scripts"),
+            ("yarn", "hardhat", "compile", "--force"),
+        )
+    if (project / "package-lock.json").is_file():
+        return (
+            ("npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"),
+            ("npx", "--no-install", "hardhat", "compile", "--force"),
+        )
+    return (
+        ("npm", "install", "--ignore-scripts", "--no-audit", "--no-fund"),
+        ("npx", "--no-install", "hardhat", "compile", "--force"),
+    )
+
+
+def _compile_hardhat_state_effects(project_path: Path, source_path: Path) -> CompilerEvidenceResult:
+    """Compile a Hardhat project locally and consume its solc build-info ASTs."""
+    install_command, compile_command = _hardhat_commands(project_path)
+    installed = subprocess.run(
+        install_command, cwd=project_path, text=True, capture_output=True, check=False
+    )
+    if installed.returncode != 0:
+        return CompilerEvidenceResult(
+            (), (), True, "dependency_install_failed", install_command,
+            installed.stdout, installed.stderr,
+        )
+
+    build_info_root = project_path / "artifacts" / "build-info"
+    shutil.rmtree(build_info_root, ignore_errors=True)
+    completed = subprocess.run(
+        compile_command, cwd=project_path, text=True, capture_output=True, check=False
+    )
+    build_files = tuple(sorted(build_info_root.rglob("*.json")))
+    stdout = installed.stdout + "\\n" + completed.stdout
+    stderr = installed.stderr + "\\n" + completed.stderr
+    if completed.returncode != 0:
+        return CompilerEvidenceResult(
+            (), (), True, "compile_failed", compile_command, stdout, stderr,
+            tuple(map(str, build_files)),
+        )
+
+    evidence: list[SemanticRelationshipEvidence] = []
+    constraints: list[ConstraintEvidence] = []
+    versions: set[str] = set()
+    matched_source_count, source_ast_found = _build_info_ast_diagnostics(
+        build_files, source_path, project_path
+    )
+    for build_file in build_files:
+        try:
+            payload = json.loads(build_file.read_text(encoding="utf-8"))
+            version = payload.get("solcVersion")
+            if isinstance(version, str):
+                versions.add(version)
+            evidence.extend(extract_state_effects_from_build_info(build_file, source_path, project_path))
+            constraints.extend(extract_constraints_from_build_info(build_file, source_path, project_path))
+        except (OSError, json.JSONDecodeError):
+            continue
+    # Hardhat may produce multiple build-info records that repeat dependency ASTs.
+    unique_evidence: dict[tuple[Any, ...], SemanticRelationshipEvidence] = {}
+    for item in evidence:
+        key = (item.source, item.function, item.relation, item.target, item.ast_node_id,
+               item.function_ast_node_id, item.target_ast_node_id, item.source_location)
+        unique_evidence.setdefault(key, item)
+    unique_constraints = tuple(dict.fromkeys(constraints))
+    if unique_evidence or unique_constraints:
+        status = "success"
+    elif source_ast_found:
+        status = "ast_present_no_supported_evidence"
+    elif matched_source_count:
+        status = "source_present_without_ast"
+    else:
+        status = "no_ast_for_source"
+    return CompilerEvidenceResult(
+        tuple(unique_evidence.values()), unique_constraints, True, status, compile_command,
+        stdout, stderr, tuple(map(str, build_files)), tuple(sorted(versions)),
+        len(build_files), matched_source_count, source_ast_found,
+    )
+
+
 def compile_state_effects(project: str | Path, source: str | Path) -> CompilerEvidenceResult:
-    """Compile a Foundry project and consume compiler AST evidence when available.
+    """Compile Foundry or Hardhat projects and consume compiler AST evidence.
 
     Compilation failure is a capability gap, not evidence that no state effect exists.
     """
@@ -126,6 +215,8 @@ def compile_state_effects(project: str | Path, source: str | Path) -> CompilerEv
     command = ("forge", "build", "--build-info")
     if not project_path.exists() or not source_path.exists():
         return CompilerEvidenceResult((), (), False, "input_missing", command, "", "project or source missing")
+    if not (project_path / "foundry.toml").is_file() and _is_hardhat_project(project_path):
+        return _compile_hardhat_state_effects(project_path, source_path)
 
     with tempfile.TemporaryDirectory(prefix="cydra-build-info-", dir=project_path.parent) as temp:
         info_path = Path(temp)
