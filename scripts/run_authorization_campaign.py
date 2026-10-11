@@ -23,6 +23,11 @@ from cydra.reasoning import (
 
 _IMPORT_RE = re.compile(r'''\bimport\s+(?:[^\"']+\s+from\s+)?[\"']([^\"']+)[\"']\s*;''')
 
+def _seed_coverage_allows_measurement(hypotheses, seeds) -> bool:
+    """Seed coverage is a successful measurement, never finding readiness."""
+    return not hypotheses and bool(seeds)
+
+
 
 def _prepare_isolated_foundry_project(target_root: Path, source: Path, destination: Path) -> Path:
     """Copy only the target's local Solidity import closure into a clean Foundry root."""
@@ -437,9 +442,18 @@ def main() -> int:
                 args.output.parent.mkdir(parents=True, exist_ok=True)
                 args.output.write_text(json.dumps(_json(payload), indent=2) + "\n", encoding="utf-8")
             print("DISPOSITION", payload["disposition"], "finding_gate=", payload["finding_gate"])
+            if _seed_coverage_allows_measurement(hypotheses, result.seeds):
+                payload["measurement_status"] = "SEEDS_READY_NO_AUTH_HYPOTHESIS"
+                payload["seed_count"] = len(result.seeds)
+                payload["finding_gate"] = "NOT_READY"
+                if args.output:
+                    args.output.parent.mkdir(parents=True, exist_ok=True)
+                    args.output.write_text(json.dumps(_json(payload), indent=2) + "\\n", encoding="utf-8")
+                print("SEED_COVERAGE", len(result.seeds), "measurement=PASS", "finding_gate=NOT_READY")
+                return 0
             if args.allow_no_hypothesis:
                 return 0
-            raise SystemExit("blind authorization backtest produced no authorization hypothesis")
+            raise SystemExit("blind authorization backtest produced no authorization hypothesis or measurable seed coverage")
 
         for dependency in args.target_npm_dependency:
             subprocess.run(
