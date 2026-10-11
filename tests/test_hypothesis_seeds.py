@@ -76,3 +76,11 @@ def test_inherited_body_out_of_scope_emits_blocked_seed(tmp_path: Path):
     assert seed.invariant_source == "generic"
     assert any("inherited_body_out_of_scope:" in item for item in seed.provenance)
     assert any("Base.sol::executeMetaTxn" in item for item in seed.provenance)
+
+
+def test_seed_coverage_counts_as_measurement_not_finding_readiness():
+    from scripts.run_authorization_campaign import _seed_coverage_allows_measurement
+
+    assert _seed_coverage_allows_measurement([], [object()])
+    assert not _seed_coverage_allows_measurement([object()], [object()])
+    assert not _seed_coverage_allows_measurement([], [])
