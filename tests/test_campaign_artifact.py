@@ -26,7 +26,7 @@ def test_campaign_artifact_preserves_inherited_modifier_provenance(tmp_path: Pat
         name="Derived", source=str(source), functions=(local,),
         inherits=("Base",), inherited_functions=(base,),
     )
-    result = SimpleNamespace(contracts=(contract,), invariants=())
+    result = SimpleNamespace(contracts=(contract,), invariants=(), evidence=())
     compiler = SimpleNamespace(executed=True, status="test", compiler_versions=("0.8.20",))
 
     payload = _no_hypothesis_payload("fixture@pinned", compiler, result)
