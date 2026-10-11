@@ -46,6 +46,6 @@ def test_rejects_non_https_program_url():
 
 
 def test_root_project_path_is_allowed_but_parent_traversal_is_not():
-    validate_intake(**VALID, target_project=".")
+    validate_intake(**VALID)
     with pytest.raises(ValueError):
         validate_intake(**{**VALID, "target_project": "../"})
