@@ -3,7 +3,7 @@ name: Blind Unfamiliar Authorization Benchmark
 on:
   push:
     branches:
-      - "campaign/unfamiliar-authorization-*"
+      - "campaign/unfamiliar-authorization-vaults-splitter*"
   workflow_dispatch:
 
 permissions:

@@ -39,3 +39,15 @@ The new repository has working positive and negative control loops, but has not 
 2. Select another currently eligible target or held-out positive control with a real authorization boundary, pin its exact source revision, and keep the expected function hidden.
 3. If the candidate is not selected, inspect the model and source evidence before deciding whether the result is a correct negative or a capability gap.
 4. Require a meaningful executed experiment, protected negative control, causal differential, independent reproduction, and impact evidence before declaring readiness.
+
+
+## Additional unfamiliar-target replay — OpenZeppelin ERC7786OpenBridge
+
+- Official scope: https://immunefi.com/bug-bounty/openzeppelin/scope/
+- Exact in-scope commit: 0361935dc5edd233adbb9fbae5871ccbb8c739d8
+- Campaign: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38124629642
+- The run selected zero authorization hypotheses and executed zero candidate experiments.
+- The model recognized owner-protected administrative methods but missed addGateway/removeGateway writes through EnumerableSet library calls.
+- This is NOT_SELECTED / BLOCKED, not a finding and not proof of safety. Full report: docs/campaigns/2026-10-11-openzeppelin-openbridge.md.
+
+The library-mediated storage gap has a generic regression fix in PR #6: qualified state types and common collection mutators are now represented as candidate state effects. The fix is covered by a regression fixture and passed Python regression on run #38124766980.
