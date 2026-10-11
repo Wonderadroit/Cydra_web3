@@ -1,0 +1,54 @@
+name: Blind Unfamiliar Authorization Benchmark
+
+on:
+  push:
+    branches:
+      - "campaign/unfamiliar-authorization-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  blind-unfamiliar-target:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: foundry-rs/foundry-toolchain@v1
+      - run: python -m pip install --upgrade pip pytest
+      - run: python -m pip install -e .
+      - name: Record official program scope and frozen target
+        run: |
+          {
+            echo "Program: Immunefi"
+            echo "Official scope: https://immunefi.com/bug-bounty/immunefi/scope/"
+            echo "Official resources: https://immunefi.com/bug-bounty/immunefi/resources/"
+            echo "Codebase resource: https://github.com/immunefi-team/vaults-splitter"
+            echo "Target asset: Splitter (listed in the official program scope)"
+            echo "Target repository: https://github.com/immunefi-team/vaults-splitter"
+            echo "Target revision: 6f64c3f0557967eee9b14482ffa62187101c79ef"
+            echo "Target path: src/Splitter.sol"
+            echo "Execution: local-only source/model/Foundry tests; no production or public-testnet transactions"
+            echo "Blindness: no expected vulnerable function supplied to the hypothesis engine"
+          } | tee "$RUNNER_TEMP/unfamiliar-target-intake.txt"
+      - name: Run blind authorization campaign (no zero-hypothesis pass)
+        env:
+          PYTHONPATH: src
+        run: |
+          set -o pipefail
+          python scripts/run_authorization_campaign.py             --target-repo https://github.com/immunefi-team/vaults-splitter.git             --target-ref 6f64c3f0557967eee9b14482ffa62187101c79ef             --target-path src/Splitter.sol             --target-project .             --require-ready             --output "$RUNNER_TEMP/unfamiliar-authorization.json"             2>&1 | tee "$RUNNER_TEMP/unfamiliar-authorization.log"
+      - name: Upload campaign evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cydra-web3-unfamiliar-authorization
+          path: |
+            ${{ runner.temp }}/unfamiliar-target-intake.txt
+            ${{ runner.temp }}/unfamiliar-authorization.json
+            ${{ runner.temp }}/unfamiliar-authorization.log
+          if-no-files-found: warn
+          retention-days: 14
