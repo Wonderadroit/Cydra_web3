@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .ast_dataflow import SemanticRelationshipEvidence, extract_ast_relationships
-from .compiler_constraints import ConstraintEvidence, extract_parameter_constraints
+from .compiler_constraints import ConstraintEvidence, collect_ast_declarations, extract_parameter_constraints
 
 
 @dataclass(frozen=True)
@@ -83,8 +83,10 @@ def extract_state_effects_from_build_info(build_info: Path, source: Path, projec
 def extract_constraints_from_build_info(build_info: Path, source: Path, project: Path) -> tuple[ConstraintEvidence, ...]:
     payload = json.loads(build_info.read_text(encoding="utf-8"))
     evidence: list[ConstraintEvidence] = []
-    for source_key, ast in _source_asts(payload):
-        evidence.extend(extract_parameter_constraints(ast, source_key))
+    source_asts = _source_asts(payload)
+    declarations = collect_ast_declarations([ast for _, ast in source_asts])
+    for source_key, ast in source_asts:
+        evidence.extend(extract_parameter_constraints(ast, source_key, declarations))
     return tuple(dict.fromkeys(evidence))
 
 
