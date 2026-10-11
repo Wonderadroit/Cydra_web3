@@ -109,3 +109,14 @@ The parser now models direct writes, same-contract helper-mediated writes, payab
 - Campaign artifacts now include inherited public/external function coverage, declaring-source paths, and declared versus effective modifier provenance. A regression verifies that explicit super dispatch can expose inherited modifier evidence without fabricating a hypothesis.
 - Post-change held-out replay is running: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38144714579
 - The prior replay remained BLOCKED / NOT_READY with zero hypotheses and zero candidate experiments. The provenance replay must be inspected before claiming this gap is closed.
+
+
+## Settler inherited-provenance replay completed — 2026-10-11
+
+- Replay workflow completed successfully: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38144714579
+- Artifact: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38144714579/artifacts/11703689549
+- The artifact now shows `executeMetaTxn` with effective modifiers `onlySolver` and `metaTx`, declared modifiers empty, and inherited provenance. It also exposes inherited `setSolver` protected by `onlyOwner`.
+- Campaign result remains `NO_AUTH_HYPOTHESIS`, `BLOCKED`, `NOT_READY`; zero semantic state effects, zero hypotheses, and zero candidate experiments.
+- This is an observability improvement, not a security pass or vulnerability finding. The compiler status remains ambiguous (`no_ast_for_source`), and no paired signature/witness execution has been run.
+- Full report: `docs/campaigns/2026-10-11-0x-settler-inherited-provenance.md`.
+- Next: clarify compiler/AST status and add local paired valid/invalid signature-witness execution tests before trying to claim the inherited meta-transaction authorization boundary is covered.
