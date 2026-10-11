@@ -63,7 +63,7 @@ def _effective_declared_modifiers(contract: ContractModel, function: FunctionMod
     """
     declared = list(_declared_modifiers(contract, function))
     body = _function_body(contract, function)
-    if body is None or not re.search(rf"\\bsuper\\s*\\.\\s*{re.escape(function.name)}\\s*\\(", body):
+    if body is None or not re.search(rf"super\s*\.\s*{re.escape(function.name)}\s*\(", body):
         return tuple(declared)
     for inherited in contract.inherited_functions:
         if inherited.name != function.name or inherited.visibility not in {"public", "external", "internal"}:
