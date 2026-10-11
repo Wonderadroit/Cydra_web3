@@ -27,7 +27,7 @@ def test_campaign_artifact_preserves_inherited_modifier_provenance(tmp_path: Pat
         inherits=("Base",), inherited_functions=(base,),
     )
     result = SimpleNamespace(contracts=(contract,), invariants=(), evidence=())
-    compiler = SimpleNamespace(executed=True, status="test", compiler_versions=("0.8.20",))
+    compiler = SimpleNamespace(executed=True, status="test", compiler_versions=("0.8.20",), evidence=())
 
     payload = _no_hypothesis_payload("fixture@pinned", compiler, result)
     surface = payload["surface_coverage"][0]
