@@ -98,6 +98,12 @@ def _source_dependency_closure(
         return set(), ()
     remappings = _project_remappings(project)
     import_re = re.compile(r"""\bimport\s+(?:[^;]*?\s+from\s+)?['"]([^'"]+)['"]\s*;""", re.DOTALL)
+    # Ignore Solidity line/block comments before import discovery. Otherwise a
+    # deliberately disabled import is treated as a required dependency and the
+    # target closure is incorrectly marked incomplete.
+    def without_comments(text: str) -> str:
+        text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
+        return re.sub(r"//[^\n]*", "", text)
     closure: set[str] = set()
     unresolved: set[str] = set()
     pending = list(starts)
@@ -142,7 +148,7 @@ def _source_dependency_closure(
         if importer in closure:
             continue
         closure.add(importer)
-        for spec in import_re.findall(content_for(importer)):
+        for spec in import_re.findall(without_comments(content_for(importer))):
             resolved = resolve(importer, spec)
             if resolved is None:
                 unresolved.add(f"{importer}: {spec}")
