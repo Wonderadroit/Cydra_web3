@@ -54,6 +54,26 @@ def _declared_modifiers(contract: ContractModel, function: FunctionModel) -> tup
     return function.modifiers or _source_declared_modifiers(contract, function)
 
 
+def _effective_declared_modifiers(contract: ContractModel, function: FunctionModel) -> tuple[str, ...]:
+    """Include base-function modifiers only when the override explicitly dispatches via super.
+
+    This narrow approximation does not infer that every inherited function or
+    external call is protected. A base modifier is effective for this path only
+    when the override body contains a matching super.<function>(...) dispatch.
+    """
+    declared = list(_declared_modifiers(contract, function))
+    body = _function_body(contract, function)
+    if body is None or not re.search(rf"super\s*\.\s*{re.escape(function.name)}\s*\(", body):
+        return tuple(declared)
+    for inherited in contract.inherited_functions:
+        if inherited.name != function.name or inherited.visibility not in {"public", "external", "internal"}:
+            continue
+        for modifier in inherited.modifiers:
+            if modifier not in declared:
+                declared.append(modifier)
+    return tuple(declared)
+
+
 def _function_body(contract: ContractModel, function: FunctionModel) -> str | None:
     try:
         source = Path(contract.source).read_text(encoding="utf-8")
@@ -127,7 +147,7 @@ def _admin_named_functions(
 
 def access_control_invariant(contract: ContractModel, privileged_modifier: str | None = None) -> Invariant:
     if privileged_modifier is None:
-        observed = sorted({m for f in _externally_callable_functions(contract) for m in _declared_modifiers(contract, f)})
+        observed = sorted({m for f in _externally_callable_functions(contract) for m in _effective_declared_modifiers(contract, f)})
         privileged_modifier = observed[0] if len(observed) == 1 else ("observed privileged modifier" if observed else "onlyGov")
     return Invariant("INV-AUTH-001", f"Administrative state-changing operations must enforce {privileged_modifier} authorization.", "structural sibling-function rule; modifier-bearing externally callable functions", 0.90)
 
@@ -138,12 +158,12 @@ def generate_access_control_hypotheses(
 ) -> tuple[Hypothesis, ...]:
     semantic_effects = build_state_effect_index(semantic_evidence) if semantic_evidence is not None else None
     admin_functions = _admin_named_functions(contract, semantic_effects)
-    declared = tuple((f, _declared_modifiers(contract, f)) for f in admin_functions)
-    protected_functions = [f for f in _externally_callable_functions(contract) if _declared_modifiers(contract, f)]
+    declared = tuple((f, _effective_declared_modifiers(contract, f)) for f in admin_functions)
+    protected_functions = [f for f in _externally_callable_functions(contract) if _effective_declared_modifiers(contract, f)]
     if not protected_functions and not admin_functions:
         return ()
     if protected_functions:
-        observed = sorted({m for f in protected_functions for m in _declared_modifiers(contract, f)})
+        observed = sorted({m for f in protected_functions for m in _effective_declared_modifiers(contract, f)})
         invariant = access_control_invariant(contract, observed[0] if len(observed) == 1 else "observed privileged modifier")
     else:
         invariant = access_control_invariant(contract)

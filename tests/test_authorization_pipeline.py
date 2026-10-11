@@ -1,6 +1,8 @@
 from pathlib import Path
 
 from cydra.authorization_pipeline import investigate_authorization
+from cydra.models import ContractModel, FunctionModel
+from cydra.reasoning import generate_access_control_hypotheses
 
 
 def test_authorization_investigation_is_scoped_to_authorization(tmp_path: Path):
@@ -95,3 +97,43 @@ def test_library_mutator_on_qualified_storage_variable_is_modeled(tmp_path: Path
     assert "_gateways" in contract.state_variables
     assert "_gateways" in functions["addGateway"].writes
     assert any(item.hypothesis_id == "H-AUTH-addGateway" for item in result.hypotheses)
+
+
+
+def test_inherited_modifier_counts_only_when_override_calls_super(tmp_path: Path):
+    source = tmp_path / "Derived.sol"
+    source.write_text(
+        "pragma solidity ^0.8.20;\n"
+        "contract Derived {\n"
+        "  address public treasury;\n"
+        "  function setTreasury(address next) external { super.setTreasury(next); }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    function = FunctionModel(
+        name="setTreasury", visibility="external", modifiers=(), writes=("treasury",),
+        external_calls=(), line=4,
+    )
+    inherited = FunctionModel(
+        name="setTreasury", visibility="public", modifiers=("onlyOwner",), writes=("treasury",),
+        external_calls=(), line=12,
+    )
+    contract = ContractModel(
+        name="Derived", source=str(source), functions=(function,),
+        state_variables=("treasury",), inherited_functions=(inherited,),
+    )
+
+    # The base modifier executes because the override explicitly dispatches to super.
+    assert generate_access_control_hypotheses(contract) == ()
+
+    # Merely having a protected same-name base function must not mask an unguarded override.
+    source.write_text(
+        "pragma solidity ^0.8.20;\n"
+        "contract Derived {\n"
+        "  address public treasury;\n"
+        "  function setTreasury(address next) external { treasury = next; }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    hypotheses = generate_access_control_hypotheses(contract)
+    assert {item.hypothesis_id for item in hypotheses} == {"H-AUTH-setTreasury"}
