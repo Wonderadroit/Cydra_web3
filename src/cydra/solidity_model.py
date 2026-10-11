@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from pathlib import Path
 
 from .interface_resolver import ResolvedInterface, resolve_interface, resolve_named_type_source
@@ -550,7 +551,9 @@ def _inherited_functions(
         base = next((item for item in contracts if item.name == inherited_name), None)
         if base is None:
             continue
-        functions.extend(base.functions)
+        # Keep inherited declarations as context, but do not imply their bodies
+        # have been analyzed in the selected target-source scope.
+        functions.extend(replace(function, body_scope="out_of_scope") for function in base.functions)
         functions.extend(_inherited_functions(root, resolved_path, base.inherits, seen))
     deduped: list[FunctionModel] = []
     seen_keys: set[tuple[str, int, str]] = set()
