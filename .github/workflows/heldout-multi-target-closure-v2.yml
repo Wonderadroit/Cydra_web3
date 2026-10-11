@@ -1,0 +1,79 @@
+name: CYDRA held-out multi-target source closure v2
+
+on:
+  push:
+    branches: ["campaigns/heldout-multi-target-closure-v2"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  held-out-authorization-campaigns:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: foundry-rs/foundry-toolchain@v1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: python -m pip install --upgrade pip pytest
+      - run: python -m pip install -e .
+      - name: Validate pinned 0x Settler campaign
+        run: |
+          python scripts/validate_campaign_intake.py \
+            --program-url "https://immunefi.com/bug-bounty/0x/scope/" \
+            --target-repo "https://github.com/0xProject/0x-settler" \
+            --target-ref "872b0e4cc83cce6a75eb4a1705f5bfd06e21a6c5" \
+            --target-path "src/chains/Mainnet/Intent.sol" \
+            --target-project "."
+      - name: Run pinned 0x Settler campaign
+        env:
+          PYTHONPATH: src
+        run: |
+          set -o pipefail
+          python scripts/run_authorization_campaign.py \
+            --target-repo "https://github.com/0xProject/0x-settler" \
+            --target-ref "872b0e4cc83cce6a75eb4a1705f5bfd06e21a6c5" \
+            --target-path "src/chains/Mainnet/Intent.sol" \
+            --target-project "." \
+            --allow-no-hypothesis \
+            --require-ready \
+            --output "$RUNNER_TEMP/settler-campaign.json" 2>&1 | tee "$RUNNER_TEMP/settler-campaign.log"
+      - name: Validate scope-pinned CoW authentication campaign
+        run: |
+          python scripts/validate_campaign_intake.py \
+            --program-url "https://immunefi.com/bug-bounty/cowprotocol/scope/" \
+            --target-repo "https://github.com/cowprotocol/contracts" \
+            --target-ref "6ebbd810ff2da635fb6f88e9a15fde196f8c852a" \
+            --target-path "src/contracts/GPv2AllowListAuthentication.sol" \
+            --target-project "."
+      - name: Run scope-pinned CoW authentication campaign
+        env:
+          PYTHONPATH: src
+        run: |
+          set -o pipefail
+          python scripts/run_authorization_campaign.py \
+            --target-repo "https://github.com/cowprotocol/contracts" \
+            --target-ref "6ebbd810ff2da635fb6f88e9a15fde196f8c852a" \
+            --target-path "src/contracts/GPv2AllowListAuthentication.sol" \
+            --target-project "." \
+            --allow-no-hypothesis \
+            --require-ready \
+            --output "$RUNNER_TEMP/cow-campaign.json" 2>&1 | tee "$RUNNER_TEMP/cow-campaign.log"
+      - name: Upload both campaign evidence sets
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cydra-heldout-multi-target-closure-v2
+          path: |
+            ${{ runner.temp }}/settler-campaign.json
+            ${{ runner.temp }}/settler-campaign.log
+            ${{ runner.temp }}/cow-campaign.json
+            ${{ runner.temp }}/cow-campaign.log
+          if-no-files-found: warn
+          retention-days: 30
