@@ -348,6 +348,7 @@ def _no_hypothesis_payload(target, compiler, result, related_intent_parity_hypot
             for item in compiler.constraints
         ],
         "invariants": _json(result.invariants),
+        "hypothesis_seeds": _json(result.seeds),
         "hypotheses": [],
         "related_intent_parity_hypotheses": related,
         "classification": "UNSUPPORTED_INTENT_PARITY_HYPOTHESIS" if has_related else "NO_AUTH_HYPOTHESIS",
