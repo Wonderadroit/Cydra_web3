@@ -126,9 +126,22 @@ def _unresolved_execution_path(
         else:
             call_name = str(call).rsplit(".", 1)[-1].split("(", 1)[0].strip()
             receiver = ""
-        if call_name and call_name not in known_names:
+        if not call_name:
+            continue
+        callee = local.get(call_name) or inherited.get(call_name)
+        classified = bool(
+            callee
+            and (
+                callee.writes
+                or callee.modifiers
+                or callee.authorization_predicates
+                or callee.state_predicates
+                or callee.return_expressions
+            )
+        )
+        if call_name not in known_names or not classified:
             prefix = receiver + "." if receiver else ""
-            unresolved.append(f"model_call:{prefix}{call_name}:callee_outside_analysis_budget")
+            unresolved.append(f"model_call:{prefix}{call_name}:callee_effect_or_authorization_unclassified")
 
     return tuple(dict.fromkeys(unresolved))
 
