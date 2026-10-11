@@ -29,7 +29,7 @@ _STATE_COMPARISON_RE = re.compile(
     r"|0x[0-9A-Fa-f]+|\d+|true|false)"
 )
 _STATE_DECLARATION_RE = re.compile(
-    r"^\s*(?P<type>mapping\s*\([^;]+\)|[A-Za-z_]\w*(?:\s*\[[^\]]*\])*)\s+"
+    r"^\s*(?P<type>mapping\s*\([^;]+\)|[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*(?:\s*\[[^\]]*\])*)\s+"
     r"(?:(?:public|private|internal|external|constant|immutable|transient|override|virtual|payable)\s+)*"
     r"(?P<name>[A-Za-z_]\w*)\s*(?:=.*)?$"
 )
@@ -682,6 +682,22 @@ def parse_solidity(path: str | Path, *, include_inherited: bool = True) -> tuple
                 r"\s*(?:=(?!=)|\+=|-=|\*=|/=|%=|\+\+|--)",
                 body,
             )
+            # Library-style mutators on known state-held collections are candidate
+            # state effects even when Solidity expresses the mutation as a method call.
+            # This is modeling evidence only; execution remains the finding gate.
+            collection_mutators = {
+                "add", "remove", "set", "delete", "push", "pop", "clear",
+                "insert", "erase", "update", "write", "store", "replace",
+                "append", "swap",
+            }
+            for state_name in state_variables:
+                if re.search(
+                    rf"\b{re.escape(state_name)}\s*\.\s*(?:"
+                    + "|".join(sorted(collection_mutators))
+                    + r")\s*\(",
+                    body,
+                ):
+                    write_candidates.append(state_name)
             # State-model writes are explicit contract-state transitions, not local assignments.
             writes = tuple(sorted(set(name for name in write_candidates if name in state_variables)))
             external_call_matches = re.finditer(r"\b(\w+)\.(\w+)\s*\(", body)
