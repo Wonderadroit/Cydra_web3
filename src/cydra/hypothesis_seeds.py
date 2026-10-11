@@ -119,9 +119,16 @@ def _unresolved_execution_path(
 
     known_names = set(local) | set(inherited)
     for call in function.external_calls:
-        call_name = call.rsplit(".", 1)[-1].split("(", 1)[0].strip()
+        # The parser represents some call sites as (receiver, method) pairs.
+        if isinstance(call, (tuple, list)):
+            call_name = str(call[-1]).split("(", 1)[0].strip() if call else ""
+            receiver = str(call[0]) if len(call) > 1 else ""
+        else:
+            call_name = str(call).rsplit(".", 1)[-1].split("(", 1)[0].strip()
+            receiver = ""
         if call_name and call_name not in known_names:
-            unresolved.append(f"model_call:{call}:callee_outside_analysis_budget")
+            prefix = receiver + "." if receiver else ""
+            unresolved.append(f"model_call:{prefix}{call_name}:callee_outside_analysis_budget")
 
     return tuple(dict.fromkeys(unresolved))
 
@@ -186,7 +193,7 @@ def generate_hypothesis_seeds(contracts: tuple[ContractModel, ...] | list[Contra
                 invariant_source=invariant_source,
                 falsification=(
                     f"Under documented preconditions, a caller outside the evidenced trust boundary "
-                    f"causes the questioned state change or execution effect through {function.name}; "
+                    f"changes the questioned state or causes an execution effect through {function.name}; "
                     "compare against a protected control."
                 ),
                 preconditions_needed=prerequisites,
