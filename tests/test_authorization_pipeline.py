@@ -38,3 +38,34 @@ def test_no_hypothesis_is_not_reported_as_secure(tmp_path: Path):
     assert result.status == "NO_AUTH_HYPOTHESIS"
     assert result.hypotheses == ()
     assert result.experiments == ()
+
+
+def test_payable_state_and_helper_mediated_writer_are_modeled(tmp_path: Path):
+    source = tmp_path / "HelperTarget.sol"
+    source.write_text(
+        "pragma solidity ^0.8.20;\n"
+        "contract HelperTarget {\n"
+        "  address public owner;\n"
+        "  address payable public treasury;\n"
+        "  modifier onlyOwner() { require(msg.sender == owner, 'owner'); _; }\n"
+        "  function _writeTreasury(address payable next) internal { treasury = next; }\n"
+        "  function setTreasury(address payable next) external { _writeTreasury(next); }\n"
+        "  function adminTreasury(address payable next) external onlyOwner { _writeTreasury(next); }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    result = investigate_authorization(source, target="helper-mediated-control@pinned")
+
+    contract = next(item for item in result.contracts if item.name == "HelperTarget")
+    functions = {item.name: item for item in contract.functions}
+    assert "treasury" in contract.state_variables
+    assert "treasury" in functions["_writeTreasury"].writes
+    assert "treasury" in functions["setTreasury"].writes
+    assert any(
+        effect.function == "setTreasury"
+        and effect.state == "treasury"
+        and effect.via_function == "_writeTreasury"
+        for effect in result.derived_effects
+    )
+    assert any(item.hypothesis_id == "H-AUTH-setTreasury" for item in result.hypotheses)
