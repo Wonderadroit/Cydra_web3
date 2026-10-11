@@ -178,6 +178,28 @@ def initialization_invariant(contract: ContractModel) -> Invariant:
     return Invariant("INV-INIT-001", "Initialization must not allow an arbitrary caller to claim privileged initialization state after deployment.", "lifecycle rule; initializer function and privileged state assignment", 0.90)
 
 
+def initialization_surface_functions(contract: ContractModel) -> tuple[FunctionModel, ...]:
+    """Inventory public initialization entry points without treating them as findings.
+
+    Initializer safety depends on deployed lifecycle state and proxy construction
+    semantics. A source-only candidate must remain context-required until that state
+    is evidenced independently.
+    """
+    surfaces: list[FunctionModel] = []
+    for function in contract.functions:
+        if function.visibility not in {"public", "external"}:
+            continue
+        name = function.name.lower()
+        modifiers = {modifier.lower() for modifier in function.modifiers}
+        if (
+            name.startswith(("initialize", "initialise", "init"))
+            or "initializer" in modifiers
+            or any(modifier.startswith("reinitializer") for modifier in modifiers)
+        ):
+            surfaces.append(function)
+    return tuple(surfaces)
+
+
 def generate_initialization_hypotheses(contract: ContractModel) -> tuple[Hypothesis, ...]:
     initializers = [f for f in contract.functions if f.name.lower() in {"initialize", "initialise", "init"} and f.visibility in {"public", "external"}]
     invariant = initialization_invariant(contract)
