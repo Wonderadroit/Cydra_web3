@@ -45,7 +45,7 @@ def _observed_writes(contract: ContractModel, function: FunctionModel) -> tuple[
         source = Path(function.source or contract.source).read_text(encoding="utf-8")
     except (OSError, UnicodeError):
         return ()
-    pattern = re.compile(r"\\bfunction\\s+" + re.escape(function.name) + r"\\s*\\([^)]*\\)[^{;]*\\{", re.MULTILINE)
+    pattern = re.compile(r"\bfunction\s+" + re.escape(function.name) + r"\s*\([^)]*\)[^{;]*\{", re.MULTILINE)
     match = pattern.search(source)
     if not match:
         return ()
@@ -60,7 +60,7 @@ def _observed_writes(contract: ContractModel, function: FunctionModel) -> tuple[
     body = source[match.end():end - 1]
     writes = [
         name for name in contract.state_variables
-        if re.search(r"\\b" + re.escape(name) + r"\\b(?:\\s*\\[[^]]*\\])*\\s*(?:=(?!=)|\\+=|-=|\\*=|/=|\\+\\+|--)", body)
+        if re.search(r"\b" + re.escape(name) + r"\b(?:\s*\[[^]]*\])*\s*(?:=(?!=)|\+=|-=|\*=|/=|\+\+|--)", body)
     ]
     return tuple(sorted(set(writes)))
 
