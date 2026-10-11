@@ -84,10 +84,15 @@ def _source_dependency_closure(
     if not isinstance(sources, dict):
         return set(), ()
     relative = os.path.relpath(source.resolve(), project.resolve()).replace(os.sep, "/")
-    keys = {key.replace("\\", "/") for key in sources if isinstance(key, str)}
+    source_keys = [key for key in sources if isinstance(key, str)]
+    normalized_keys = {
+        posixpath.normpath(key.replace("\\", "/")): key
+        for key in source_keys
+    }
     starts = {
-        key for key in keys
-        if key == relative or key.endswith("/" + relative)
+        key for key in source_keys
+        if posixpath.normpath(key.replace("\\", "/")) == relative
+        or posixpath.normpath(key.replace("\\", "/")).endswith("/" + relative)
     }
     if not starts:
         return set(), ()
@@ -114,20 +119,22 @@ def _source_dependency_closure(
         candidates.append(spec)
         for prefix, target in remappings:
             if spec.startswith(prefix):
-                mapped = target + spec[len(prefix):]
+                suffix = spec[len(prefix):]
+                mapped = posixpath.normpath(posixpath.join(target, suffix))
                 candidates.extend((mapped, posixpath.join("node_modules", mapped)))
         candidates.append(posixpath.join("node_modules", spec))
-        normalized = [item.replace("\\", "/") for item in candidates]
+        normalized = [posixpath.normpath(item.replace("\\", "/")) for item in candidates]
         for candidate in normalized:
-            if candidate in keys:
-                return candidate
+            if candidate in normalized_keys:
+                return normalized_keys[candidate]
         for candidate in normalized:
-            matches = [key for key in keys if key.endswith("/" + candidate)]
+            matches = [raw for norm, raw in normalized_keys.items() if norm.endswith("/" + candidate)]
             if len(matches) == 1:
                 return matches[0]
         # Some compiler inputs retain the bare import path while filesystem-based
         # resolution sees the package under node_modules; only accept unique matches.
-        matches = [key for key in keys if key.endswith("/" + spec)]
+        spec_normalized = posixpath.normpath(spec.replace("\\", "/"))
+        matches = [raw for norm, raw in normalized_keys.items() if norm.endswith("/" + spec_normalized)]
         return matches[0] if len(matches) == 1 else None
 
     while pending:
