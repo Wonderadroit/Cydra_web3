@@ -134,7 +134,7 @@ def _hardhat_build_info_root(project: Path) -> Path:
             source = config.read_text(encoding="utf-8")
         except (OSError, UnicodeError):
             continue
-        match = re.search(r"\\bartifacts\\s*:\\s*['\\\"]([^'\\\"]+)['\\\"]", source)
+        match = re.search(r"\bartifacts\s*:\s*['\"]([^'\"]+)['\"]", source)
         if match:
             artifacts_dir = match.group(1)
         break
