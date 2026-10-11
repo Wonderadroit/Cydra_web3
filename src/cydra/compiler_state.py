@@ -23,6 +23,9 @@ class CompilerEvidenceResult:
     stderr: str
     build_info_files: tuple[str, ...] = ()
     compiler_versions: tuple[str, ...] = ()
+    build_info_count: int = 0
+    matched_source_count: int = 0
+    source_ast_found: bool = False
 
 
 def _source_keys(payload: dict[str, Any], source: Path, project: Path) -> tuple[tuple[str, dict[str, Any]], ...]:
@@ -61,6 +64,24 @@ def extract_constraints_from_build_info(build_info: Path, source: Path, project:
         if isinstance(ast, dict):
             evidence.extend(extract_parameter_constraints(ast, source_key))
     return tuple(evidence)
+
+
+def _build_info_ast_diagnostics(
+    build_files: tuple[Path, ...], source: Path, project: Path
+) -> tuple[int, bool]:
+    """Return matched source count and whether any matching source contains an AST."""
+    matched_sources = 0
+    ast_found = False
+    for build_file in build_files:
+        try:
+            payload = json.loads(build_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        for _source_key, source_payload in _source_keys(payload, source, project):
+            matched_sources += 1
+            if isinstance(source_payload.get("ast"), dict):
+                ast_found = True
+    return matched_sources, ast_found
 
 
 def _has_lite_profile(project: Path) -> bool:
@@ -113,6 +134,9 @@ def compile_state_effects(project: str | Path, source: str | Path) -> CompilerEv
         evidence: list[SemanticRelationshipEvidence] = []
         constraints: list[ConstraintEvidence] = []
         versions: set[str] = set()
+        matched_source_count, source_ast_found = _build_info_ast_diagnostics(
+            build_files, source_path, project_path
+        )
         for build_file in build_files:
             try:
                 payload = json.loads(build_file.read_text(encoding="utf-8"))
@@ -123,5 +147,17 @@ def compile_state_effects(project: str | Path, source: str | Path) -> CompilerEv
                 constraints.extend(extract_constraints_from_build_info(build_file, source_path, project_path))
             except (OSError, json.JSONDecodeError):
                 continue
-        status = "success" if evidence or constraints else "no_ast_for_source"
-        return CompilerEvidenceResult(tuple(evidence), tuple(constraints), True, status, command, completed.stdout, completed.stderr, tuple(map(str, build_files)), tuple(sorted(versions)))
+        if evidence or constraints:
+            status = "success"
+        elif source_ast_found:
+            status = "ast_present_no_supported_evidence"
+        elif matched_source_count:
+            status = "source_present_without_ast"
+        else:
+            status = "no_ast_for_source"
+        return CompilerEvidenceResult(
+            tuple(evidence), tuple(constraints), True, status, command,
+            completed.stdout, completed.stderr, tuple(map(str, build_files)),
+            tuple(sorted(versions)), len(build_files), matched_source_count,
+            source_ast_found,
+        )

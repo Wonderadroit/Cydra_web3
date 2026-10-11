@@ -251,6 +251,11 @@ def _no_hypothesis_payload(target, compiler, result, related_intent_parity_hypot
             "executed": compiler.executed,
             "status": compiler.status,
             "versions": list(compiler.compiler_versions),
+            "build_info_count": compiler.build_info_count,
+            "matched_source_count": compiler.matched_source_count,
+            "source_ast_found": compiler.source_ast_found,
+            "semantic_relationship_count": len(compiler.evidence),
+            "parameter_constraint_count": len(compiler.constraints),
         },
         "contracts": [
             {
