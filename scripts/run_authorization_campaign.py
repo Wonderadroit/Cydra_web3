@@ -254,6 +254,8 @@ def _no_hypothesis_payload(target, compiler, result, related_intent_parity_hypot
             "build_info_count": compiler.build_info_count,
             "matched_source_count": compiler.matched_source_count,
             "source_ast_found": compiler.source_ast_found,
+            "source_dependency_count": compiler.source_dependency_count,
+            "unresolved_imports": list(compiler.unresolved_imports),
             "semantic_relationship_count": len(compiler.evidence),
             "parameter_constraint_count": len(compiler.constraints),
         },
