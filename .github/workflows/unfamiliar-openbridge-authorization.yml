@@ -1,0 +1,53 @@
+name: Blind Unfamiliar Authorization Benchmark - OpenBridge
+
+on:
+  push:
+    branches:
+      - "campaign/unfamiliar-authorization-openbridge"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  blind-unfamiliar-target:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: foundry-rs/foundry-toolchain@v1
+      - run: python -m pip install --upgrade pip pytest
+      - run: python -m pip install -e .
+      - name: Record official scope and frozen target
+        run: |
+          {
+            echo "Program: OpenZeppelin"
+            echo "Official scope: https://immunefi.com/bug-bounty/openzeppelin/scope/"
+            echo "Official resources: https://immunefi.com/bug-bounty/openzeppelin/resources/"
+            echo "Target asset: ERC7786OpenBridge (the official scope pins this exact commit)"
+            echo "Target repository: https://github.com/OpenZeppelin/openzeppelin-community-contracts"
+            echo "Target revision: 0361935dc5edd233adbb9fbae5871ccbb8c739d8"
+            echo "Target path: contracts/crosschain/ERC7786OpenBridge.sol"
+            echo "Execution: local-only source/compiler/Foundry tests; no production or public-testnet transactions"
+            echo "Blindness: no expected vulnerable function supplied to the hypothesis engine"
+          } | tee "$RUNNER_TEMP/unfamiliar-target-intake.txt"
+      - name: Run blind authorization campaign
+        env:
+          PYTHONPATH: src
+        run: |
+          set -o pipefail
+          python scripts/run_authorization_campaign.py             --target-repo https://github.com/OpenZeppelin/openzeppelin-community-contracts.git             --target-ref 0361935dc5edd233adbb9fbae5871ccbb8c739d8             --target-path contracts/crosschain/ERC7786OpenBridge.sol             --target-project .             --require-ready             --output "$RUNNER_TEMP/unfamiliar-authorization.json"             2>&1 | tee "$RUNNER_TEMP/unfamiliar-authorization.log"
+      - name: Upload campaign evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cydra-web3-openbridge-authorization
+          path: |
+            ${{ runner.temp }}/unfamiliar-target-intake.txt
+            ${{ runner.temp }}/unfamiliar-authorization.json
+            ${{ runner.temp }}/unfamiliar-authorization.log
+          if-no-files-found: warn
+          retention-days: 14
