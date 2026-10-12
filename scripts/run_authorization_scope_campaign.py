@@ -6,14 +6,11 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
-
 EXCLUDED = {"src/facility/IntentDescriptor.sol"}
-
 
 def _in_scope_solidity_files(checkout: Path, source_root: Path) -> list[Path]:
     return sorted(p for p in source_root.rglob("*.sol")
                   if p.is_file() and p.relative_to(checkout).as_posix() not in EXCLUDED)
-
 
 def _stage_flags(payload: dict) -> dict[str, bool]:
     return {
@@ -22,7 +19,6 @@ def _stage_flags(payload: dict) -> dict[str, bool]:
         "experiment_plan": bool(payload.get("experiment") or payload.get("experiments")),
         "execution_attempted": isinstance(payload.get("blind_execution"), dict),
     }
-
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -97,7 +93,6 @@ def main() -> int:
     (out / "campaign-summary.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({k: v for k, v in summary.items() if k != "files"}, indent=2))
     return int(summary["files_with_runner_errors"] > 0)
-
 
 if __name__ == "__main__":
     raise SystemExit(main())
