@@ -63,15 +63,15 @@ def generate(name: str, source_relative: str, function_name: str, writes: tuple[
 
 def main():
     generate(
-        "VulnerableAuthority",
-        "tests/fixtures/vulnerable_authority/VulnerableAuthority.sol",
+        "VulnerableAuthorityRuntime",
+        "tests/fixtures/capability_verdict_runtime/src/VerdictTargets.sol",
         "setTarget",
         ("target", "_roles"),
         (ParameterModel(name="newTarget", type="address"),),
     )
     generate(
-        "PermissionlessFactory",
-        "tests/fixtures/permissionless_factory/PermissionlessFactory.sol",
+        "PermissionlessFactoryRuntime",
+        "tests/fixtures/capability_verdict_runtime/src/VerdictTargets.sol",
         "create",
         ("_isChild",),
     )
