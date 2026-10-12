@@ -1,0 +1,42 @@
+name: Capability Verdict Runtime Calibration
+
+on:
+  push:
+    branches:
+      - "test/permissionless-factory-negative-control"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  four-verdict-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+      - name: Install Foundry test utilities
+        working-directory: tests/fixtures/capability_verdict_runtime
+        run: forge install foundry-rs/forge-std --no-commit
+      - name: Execute four runtime verdict fixtures
+        working-directory: tests/fixtures/capability_verdict_runtime
+        run: |
+          set -o pipefail
+          forge test -vv 2>&1 | tee "$RUNNER_TEMP/capability-verdict-runtime.log"
+      - name: Record structured verdict artifact
+        if: always()
+        run: |
+          python scripts/record_capability_verdict_artifact.py \
+            "$RUNNER_TEMP/capability-verdict-runtime.log" \
+            "$RUNNER_TEMP/capability-verdict-runtime.json"
+      - name: Upload runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cydra-capability-verdict-runtime
+          path: |
+            ${{ runner.temp }}/capability-verdict-runtime.log
+            ${{ runner.temp }}/capability-verdict-runtime.json
+          if-no-files-found: warn
+          retention-days: 14
