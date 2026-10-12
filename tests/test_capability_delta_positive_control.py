@@ -72,5 +72,7 @@ def test_positive_control_detects_new_role_membership(tmp_path: Path):
     assert "if (!hadRoleBefore && hasRoleAfter) verdict = Verdict.Supported;" in generated
     assert "assert(verdict != Verdict.None" in generated
     assert "emit CydraVerdict" not in generated
+    assert '"CYDRA_VERDICT"' in generated
+    assert "function _recordVerdict()" in generated
     assert "require(false" not in generated
     assert "hadRoleBefore != hasRoleAfter" in generated
