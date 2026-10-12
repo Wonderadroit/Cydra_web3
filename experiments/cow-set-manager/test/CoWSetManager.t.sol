@@ -15,7 +15,6 @@ interface Vm {
     function toString(address value) external pure returns (string memory);
     function toString(uint256 value) external pure returns (string memory);
     function toString(bytes memory value) external pure returns (string memory);
-    function log(string calldata) external;
 }
 
 contract CoWSetManagerTest {
@@ -98,6 +97,7 @@ contract CoWSetManagerTest {
             judgment = "inconclusive";
         }
 
+        string memory managerLogsJson = _logsJson(logs);
         string memory evidence = string.concat(
             "{\n",
             '  "chain_id": ', vm.toString(chainId), ",\n",
@@ -111,6 +111,7 @@ contract CoWSetManagerTest {
             '  "admin_slot_raw": "', _hex32(adminSlotRaw), '",\n',
             '  "admin_address": "', vm.toString(admin), '",\n',
             '  "manager_admin_overlap": ', overlap ? "true" : "false", ",\n",
+            '  "manager_call_logs": ', managerLogsJson, ",\n",
             '  "caller_manager": { "address": "', vm.toString(managerBefore),
             '", "outcome": "', managerOk ? "success" : "reverted",
             '", "manager_after": "', vm.toString(managerAfter),
@@ -134,8 +135,29 @@ contract CoWSetManagerTest {
             "}\n"
         );
         vm.writeFile("cow-set-manager-evidence.json", evidence);
-        vm.log(string.concat("CoW setManager judgment: ", judgment));
-        vm.log(string.concat("Evidence: ", evidence));
+    }
+
+    function _logsJson(Vm.Log[] memory logs) private pure returns (string memory) {
+        string memory result = "[";
+        for (uint256 i; i < logs.length; ++i) {
+            if (i != 0) result = string.concat(result, ",");
+            result = string.concat(
+                result,
+                '{"emitter":"', _hexBytes(abi.encodePacked(logs[i].emitter)),
+                '","topics":', _topicsJson(logs[i].topics),
+                ',"data":"', _hexBytes(logs[i].data), '"}'
+            );
+        }
+        return string.concat(result, "]");
+    }
+
+    function _topicsJson(bytes32[] memory topics) private pure returns (string memory) {
+        string memory result = "[";
+        for (uint256 i; i < topics.length; ++i) {
+            if (i != 0) result = string.concat(result, ",");
+            result = string.concat(result, '"', _hex32(topics[i]), '"');
+        }
+        return string.concat(result, "]");
     }
 
     function _manager() private view returns (address value) {
