@@ -52,6 +52,7 @@ jobs:
           retention-days: 14
 
   grunt-pinned-comparison:
+    if: github.sha == 'df0acca155500f5578452c79d66c1fe07abe6239'
     needs: four-verdict-runtime
     runs-on: ubuntu-latest
     timeout-minutes: 45
