@@ -39,3 +39,26 @@ def test_stage_flags_record_hypothesis_plan_and_execution():
     })
 
     assert all(flags.values())
+
+def test_isolated_project_preserves_literal_lib_import_path(tmp_path: Path):
+    from scripts.run_authorization_campaign import _prepare_isolated_foundry_project
+
+    target = tmp_path / "target"
+    source = target / "src" / "Example.sol"
+    library = target / "lib" / "solady" / "src" / "auth" / "OwnableRoles.sol"
+    source.parent.mkdir(parents=True)
+    library.parent.mkdir(parents=True)
+    source.write_text(
+        'pragma solidity ^0.8.20; import "lib/solady/src/auth/OwnableRoles.sol"; contract Example {}\\n',
+        encoding="utf-8",
+    )
+    library.write_text("pragma solidity ^0.8.20; abstract contract OwnableRoles {}\\n", encoding="utf-8")
+    destination = tmp_path / "isolated"
+
+    _prepare_isolated_foundry_project(target, source, destination)
+
+    copied_source = destination / "src" / "Example.sol"
+    copied_library = destination / "lib" / "solady" / "src" / "auth" / "OwnableRoles.sol"
+    assert copied_source.is_file()
+    assert copied_library.read_text(encoding="utf-8") == library.read_text(encoding="utf-8")
+
