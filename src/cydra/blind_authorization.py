@@ -49,6 +49,27 @@ def _constructor_arguments(contract_model: ContractModel, *, abi_only: bool = Fa
     return ", ".join(arguments)
 
 
+def _source_for_contract(source_text: str, contract_name: str) -> str:
+    """Limit regex-based capability and guard extraction to the named contract body."""
+    match = re.search(
+        rf"\\b(?:abstract\\s+)?contract\\s+{re.escape(contract_name)}\\b[^{{]*{{",
+        source_text,
+    )
+    if match is None:
+        return source_text
+    start = match.start()
+    depth = 0
+    for index in range(match.end() - 1, len(source_text)):
+        char = source_text[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return source_text[start:index + 1]
+    return source_text[start:]
+
+
 def generate_blind_authorization_test_from_experiment(
     hypothesis: Hypothesis,
     experiment: Experiment,
@@ -89,6 +110,8 @@ def generate_blind_authorization_test_from_experiment(
         source_text = Path(contract_model.source).read_text(encoding="utf-8")
     except (OSError, UnicodeError):
         source_text = ""
+
+    source_text = _source_for_contract(source_text, target_type)
 
     # The first supported authority surface is OpenZeppelin-style AccessControl.
     # It is only measurable when both the role getter and hasRole read are present.
@@ -190,7 +213,7 @@ contract CydraBlindAuthorizationTest {{
     }}
 
     function _recordVerdict() internal {{
-        address consoleAddress = address(uint160(0x000000000000000000636f6e736f6c652e6c6f67));
+        address consoleAddress = address(uint160(0x00000000000000000000636f6e736f6c652e6c6f67));
         (bool logged,) = consoleAddress.staticcall(
             abi.encodeWithSignature("log(string,uint256)", "CYDRA_VERDICT", uint256(verdict))
         );
