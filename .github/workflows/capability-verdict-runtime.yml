@@ -50,3 +50,46 @@ jobs:
             ${{ runner.temp }}/capability-verdict-runtime.json
           if-no-files-found: warn
           retention-days: 14
+
+  grunt-pinned-comparison:
+    needs: four-verdict-runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: foundry-rs/foundry-toolchain@v1
+      - run: python -m pip install --upgrade pip pytest
+      - run: python -m pip install -e .
+      - name: Validate the same authorized Grunt target intake
+        run: |
+          python scripts/validate_campaign_intake.py \
+            --program-url "https://bountyhunte.rs/programs/3f-company-d558609e" \
+            --target-repo "https://github.com/3FLabs/grunt" \
+            --target-ref "96a18e376e8f95bbb243a774609945749d3a0b3e" \
+            --target-path "src" \
+            --target-project "."
+      - name: Rerun the pinned Grunt campaign after verdict calibration
+        env:
+          PYTHONPATH: src
+        run: |
+          set -o pipefail
+          python scripts/run_authorization_campaign.py \
+            --target-repo "https://github.com/3FLabs/grunt" \
+            --target-ref "96a18e376e8f95bbb243a774609945749d3a0b3e" \
+            --target-path "src" \
+            --target-project "." \
+            --output "$RUNNER_TEMP/grunt-after-verdict-calibration.json" \
+            2>&1 | tee "$RUNNER_TEMP/grunt-after-verdict-calibration.log"
+      - name: Upload pinned Grunt comparison evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cydra-grunt-after-verdict-calibration
+          path: |
+            ${{ runner.temp }}/grunt-after-verdict-calibration.json
+            ${{ runner.temp }}/grunt-after-verdict-calibration.log
+          if-no-files-found: warn
+          retention-days: 14
