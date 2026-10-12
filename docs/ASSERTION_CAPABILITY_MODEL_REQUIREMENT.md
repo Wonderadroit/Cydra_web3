@@ -1,6 +1,6 @@
 # Assertion-layer requirement: capability delta, not storage delta
 
-Status: **capability-delta implementation milestone; assertion logic is not yet upgraded**.
+Status: **four-verdict runtime calibration implemented and verified; pinned Grunt campaign comparison pending review**.
 
 Tracking regression: [PR #42 — permissionless factory false-positive control](https://github.com/Wonderadroit/Cydra_web3/pull/42).
 
@@ -20,13 +20,13 @@ Never collapse unmeasurable into rejected. Unknown is not evidence of safety.
 
 `PermissionlessFactory.create()` deploys a fresh child and writes `_isChild[child] = true`. The registry entry is factory storage, but its key is the newly created child and the write records that creation. A successful call plus a storage write is not, by itself, evidence that the caller gained authority.
 
-The existing generator emits a security assertion when it cannot find a matching public primitive state getter. That fallback incorrectly treats a successful permissionless factory call as a violation. The regression is marked `pytest.mark.xfail(strict=True)`: the known gap is visible as XFAIL, while an unexpected XPASS fails CI. Remove the marker only after the capability-delta implementation makes this regression pass normally.
+The generator now stores a typed verdict in public harness state and records that state to the Foundry output for structured artifact capture. It does not use events or a verdict-triggered revert as the signal. A public state getter alone is not an authority relationship; without a supported authority read, this fixture returns `unmeasurable`.
 
-**Expected post-fix verdict for this fixture: `unmeasurable`, not `rejected`.** The model does not yet have sufficient authority observations to prove the factory harmless. The regression must assert this exact verdict, not merely assert that no security assertion was emitted.
+**Observed runtime verdict for this fixture: `unmeasurable`.** The generated Foundry harness executed and the structured artifact matched this expected verdict. The positive, guarded, and broken-setup generated harnesses likewise returned `supported`, `rejected`, and `inconclusive`, respectively.
 
 ### Positive control: unauthorized authority gain
 
-Add a miniature fixture with an already-existing protected resource and a source-grounded access-control relationship. An unrelated caller invokes an unguarded `setTarget`-like operation that grants that caller withdrawal/admin authority over the pre-existing resource. The test must observe that the caller lacked the relevant membership before the call and has it afterward.
+The runtime fixture uses an already-existing protected resource and a source-grounded access-control relationship. An unrelated caller invokes an unguarded `setTarget` operation that grants that caller `DEFAULT_ADMIN_ROLE`. The generated harness observes membership as false before the call and true afterward, then records `supported`.
 
 The positive control must use a supported authority read, not infer privilege from the call result or arbitrary storage changes. For the first implementation, supported on-chain reads are deliberately limited to:
 - Ownable-style `owner()` reads.
@@ -72,4 +72,5 @@ Do not infer trust boundaries from names, storage writes, public visibility, or 
 - A successful call alone never proves unauthorized privilege gain.
 - Setup/execution failure returns `inconclusive`; unsupported or insufficient authority observations return `unmeasurable`.
 - No blanket factory/new-resource suppression rule is allowed.
-- Until both controls pass with execution evidence, do not claim the assertion-layer false positive is fixed.
+- All four generated harnesses and all four independent runtime fixture paths must pass with the expected verdict stored in the artifact.
+- The false-positive fix is not fully accepted until the pinned Grunt campaign comparison shows `TransferGuardFactory.createTransferGuard` as `unmeasurable` and no unexplained new `supported` outcomes.
