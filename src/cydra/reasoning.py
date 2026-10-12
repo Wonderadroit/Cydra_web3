@@ -66,7 +66,7 @@ def _modifier_body_enforces_authorization(contract: ContractModel, modifier_name
         return False
     source = _strip_signature_comments(source)
     pattern = re.compile(
-        rf"\\bmodifier\\s+{re.escape(modifier_name)}\\s*(?:\\([^)]*\\))?\\s*\\{{",
+        rf"\bmodifier\s+{re.escape(modifier_name)}\s*(?:\([^)]*\))?\s*\{{",
         re.MULTILINE,
     )
     for match in pattern.finditer(source):
@@ -83,18 +83,18 @@ def _modifier_body_enforces_authorization(contract: ContractModel, modifier_name
                     break
         if body is None:
             continue
-        for guard in re.finditer(r"\\b(?:require|if)\\s*\\(", body):
+        for guard in re.finditer(r"\b(?:require|if)\s*\(", body):
             opening_paren = body.find("(", guard.start())
             predicate = _balanced_parens(body, opening_paren)
-            if not re.search(r"(?:msg\\.sender|_msgSender\\s*\\(\\s*\\)|tx\\.origin)", predicate):
+            if not re.search(r"(?:msg\.sender|_msgSender\s*\(\s*\)|tx\.origin)", predicate):
                 continue
             if guard.group(0).startswith("require"):
                 return True
             tail = body[opening_paren + len(predicate) + 2:]
             branch_open = tail.find("{")
-            if branch_open >= 0 and re.search(r"\\brevert\\b", _balanced_braces(tail, branch_open)):
+            if branch_open >= 0 and re.search(r"\brevert\b", _balanced_braces(tail, branch_open)):
                 return True
-            if branch_open < 0 and re.match(r"\\s*revert\\b", tail):
+            if branch_open < 0 and re.match(r"\s*revert\b", tail):
                 return True
     return False
 
