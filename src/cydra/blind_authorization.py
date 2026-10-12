@@ -263,9 +263,7 @@ contract CydraBlindAuthorizationTest {{
         );
 {post_observation}
 {verdict_logic}
-        if (verdict == Verdict.Supported) verdictReason = "authority_delta_observed";
-        else if (verdict == Verdict.Rejected) verdictReason = "authority_delta_unchanged_with_guard";
-        else if (verdict == Verdict.Inconclusive && bytes(verdictReason).length == 0) verdictReason = "runtime_outcome_not_discriminating";
+        if (verdict == Verdict.Inconclusive && bytes(verdictReason).length == 0) verdictReason = "runtime_outcome_not_discriminating";
         assert(verdict != Verdict.None);
         _recordVerdict();
     }}
