@@ -4,6 +4,16 @@ Status: **capability-delta implementation milestone; assertion logic is not yet 
 
 Tracking regression: [PR #42 — permissionless factory false-positive control](https://github.com/Wonderadroit/Cydra_web3/pull/42).
 
+## Verdict model
+
+The assertion layer must distinguish four outcomes:
+- **supported:** the experiment measured an unauthorized authority gain over a pre-existing resource.
+- **rejected:** the experiment measured no such authority gain; the call was benign with respect to this narrow check.
+- **inconclusive:** setup or execution failed (for example, deployment failure, invalid arguments, or a call that could not be meaningfully exercised).
+- **unmeasurable:** the experiment ran, but the model could not establish the relevant authority delta because the resource, role, or supported read interface could not be established.
+
+Never collapse unmeasurable into rejected. Unknown is not evidence of safety.
+
 ## Calibration cases
 
 ### Negative control: permissionless factory
@@ -11,6 +21,8 @@ Tracking regression: [PR #42 — permissionless factory false-positive control](
 `PermissionlessFactory.create()` deploys a fresh child and writes `_isChild[child] = true`. The registry entry is factory storage, but its key is the newly created child and the write records that creation. A successful call plus a storage write is not, by itself, evidence that the caller gained authority.
 
 The existing generator emits a security assertion when it cannot find a matching public primitive state getter. That fallback incorrectly treats a successful permissionless factory call as a violation. The regression is marked `pytest.mark.xfail(strict=True)`: the known gap is visible as XFAIL, while an unexpected XPASS fails CI. Remove the marker only after the capability-delta implementation makes this regression pass normally.
+
+**Expected post-fix verdict for this fixture: `unmeasurable`, not `rejected`.** The model does not yet have sufficient authority observations to prove the factory harmless. The regression must assert this exact verdict, not merely assert that no security assertion was emitted.
 
 ### Positive control: unauthorized authority gain
 
@@ -55,9 +67,9 @@ Do not infer trust boundaries from names, storage writes, public visibility, or 
 
 ## Required regression behavior
 
-- The permissionless factory negative control passes without a security assertion after capability-delta support lands.
-- The positive control detects the caller's new supported authority membership over the pre-existing resource.
+- The permissionless factory negative control's post-fix verdict is exactly `unmeasurable`, not `rejected`.
+- The positive control detects the caller's new supported authority membership over the pre-existing resource and returns `supported`.
 - A successful call alone never proves unauthorized privilege gain.
-- Unknown/custom authority surfaces fail closed as unmeasurable/NOT_READY, not as safe.
+- Setup/execution failure returns `inconclusive`; unsupported or insufficient authority observations return `unmeasurable`.
 - No blanket factory/new-resource suppression rule is allowed.
 - Until both controls pass with execution evidence, do not claim the assertion-layer false positive is fixed.
