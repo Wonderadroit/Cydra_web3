@@ -545,6 +545,7 @@ def main() -> int:
                     "experiment": _json(experiment),
                     "blind_execution": _json(execution),
                     "classification": outcome.benchmark_status,
+                    "reason": str(exc),
                     "finding_gate": "NOT_READY",
                 }
                 if args.output:
