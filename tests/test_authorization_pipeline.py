@@ -205,4 +205,5 @@ def test_seeded_state_writer_promotes_without_authority_getter(tmp_path: Path):
     assert any(seed.target_function == "create" and seed.status == "seed"
                and seed.observed_writes for seed in result.seeds)
     assert {item.target_function for item in result.hypotheses} == {"create"}
-    assert {item.target_function for item in result.experiments} == {"create"}
+    assert len(result.experiments) == 1
+    assert result.experiments[0].hypothesis_id == result.hypotheses[0].hypothesis_id
