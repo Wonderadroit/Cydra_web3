@@ -8,7 +8,7 @@ from .interface_resolver import ResolvedInterface, resolve_interface, resolve_na
 from .models import ConstructorModel, ContractModel, FunctionModel, ParameterModel
 
 
-_CONTRACT_RE = re.compile(r"\b(?:contract|library)\s+(?P<name>\w+)(?:\s+is\s+(?P<inherits>[^\{]+))?")
+_CONTRACT_RE = re.compile(r"\b(?P<kind>abstract\s+contract|contract|interface|library)\s+(?P<name>\w+)(?:\s+is\s+(?P<inherits>[^\{]+))?")
 _PRAGMA_SOLIDITY_RE = re.compile(r"pragma\s+solidity\s+([^;]+);", re.MULTILINE)
 _FUNCTION_RE = re.compile(
     r"\bfunction\s+(\w+)\s*\(([^)]*)\)\s*([^\{;]*)\{", re.MULTILINE
@@ -616,6 +616,9 @@ def parse_solidity(path: str | Path, *, include_inherited: bool = True) -> tuple
 
     for contract_match in _CONTRACT_RE.finditer(parse_source):
         contract_name = contract_match.group("name")
+        raw_kind = re.sub(r"\s+", " ", contract_match.group("kind")).strip()
+        contract_kind = "contract" if raw_kind == "abstract contract" else raw_kind
+        explicitly_abstract = raw_kind == "abstract contract"
         inherits = _inheritance_names(contract_match.group("inherits"))
         contract_start = contract_match.end()
         next_contract = _CONTRACT_RE.search(parse_source, contract_start)
@@ -741,6 +744,9 @@ def parse_solidity(path: str | Path, *, include_inherited: bool = True) -> tuple
                 declared_types=declared_types,
                 inherited_resolved_interfaces=tuple(inherited_resolved_interfaces),
                 inherited_functions=_inherited_functions(root, path, inherits) if include_inherited else (),
+                contract_kind=contract_kind,
+                has_unimplemented_functions=(explicitly_abstract or bool(re.search(r"\bfunction\s+[A-Za-z_]\w*\s*\([^)]*\)[^{};]*;", contract_body))),
+                function_body_metadata_complete=True,
             )
         )
 
