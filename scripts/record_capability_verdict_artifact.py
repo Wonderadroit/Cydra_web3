@@ -13,7 +13,7 @@ expected = {"supported", "unmeasurable", "rejected", "inconclusive"}
 counts = {name: observed.count(name) for name in sorted(expected)}
 artifact = {
     "schema_version": 1,
-    "source": "Foundry runtime fixture state assertions",
+    "source": "CYDRA-generated Foundry harness public verdict state",
     "verdicts": [{"verdict": name, "observations": counts[name]} for name in sorted(expected)],
     "all_four_observed_once": set(observed) == expected and all(counts[name] == 1 for name in expected),
 }
