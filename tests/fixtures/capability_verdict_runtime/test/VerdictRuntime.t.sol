@@ -50,7 +50,7 @@ contract CapabilityVerdictRuntimeTest {
         (bool ok, bytes memory data) = attacker.callTarget(address(target), abi.encodeWithSignature("setTarget(address)", address(0xCAFE)));
         bool afterRole = target.hasRole(target.DEFAULT_ADMIN_ROLE(), address(attacker));
         require(!ok && !afterRole && !beforeRole, "guarded call changed authority or did not revert");
-        require(_revertReason(data) == "guarded: only owner", "source guard mismatch");
+        require(keccak256(bytes(_revertReason(data))) == keccak256(bytes("guarded: only owner")), "source guard mismatch");
         _report(beforeRole == afterRole ? Verdict.Rejected : Verdict.Inconclusive, Verdict.Rejected, "rejected");
     }
 
