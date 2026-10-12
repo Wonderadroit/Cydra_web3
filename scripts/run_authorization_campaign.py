@@ -49,11 +49,15 @@ def _prepare_isolated_foundry_project(target_root: Path, source: Path, destinati
     while pending:
         current = pending.pop()
         try:
-            relative = current.relative_to(source_root)
-            destination_file = src_root / relative
+            relative = current.relative_to(target_root / "lib")
+            destination_file = destination / "lib" / relative
         except ValueError:
-            relative = current.relative_to(target_root)
-            destination_file = destination / "src" / relative
+            try:
+                relative = current.relative_to(source_root)
+                destination_file = src_root / relative
+            except ValueError:
+                relative = current.relative_to(target_root)
+                destination_file = destination / "src" / relative
         if current in copied:
             continue
         copied.add(current)
@@ -74,6 +78,11 @@ def _prepare_isolated_foundry_project(target_root: Path, source: Path, destinati
             if imported.startswith("."):
                 dependency = (current.parent / imported).resolve()
             elif imported.startswith("contracts/"):
+                dependency = (target_root / imported).resolve()
+            elif imported.startswith("lib/"):
+                # Preserve literal repository-root library imports at the same path
+                # inside the isolated project; copy only files reached by the
+                # existing import-closure traversal.
                 dependency = (target_root / imported).resolve()
             else:
                 dependency = None
