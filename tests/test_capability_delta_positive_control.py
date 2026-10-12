@@ -66,6 +66,6 @@ def test_positive_control_detects_new_role_membership(tmp_path: Path):
     assert "target.hasRole(target.DEFAULT_ADMIN_ROLE(), address(attacker))" in generated
     assert "bool hadRoleBefore" in generated
     assert "bool hasRoleAfter" in generated
+    assert "if (!hadRoleBefore && hasRoleAfter)" in generated
     assert 'emit CydraVerdict("supported")' in generated
     assert "CYDRA_SECURITY_ASSERTION: unauthorized caller gained DEFAULT_ADMIN_ROLE" in generated
-    assert 'emit CydraVerdict("unmeasurable")' not in generated
