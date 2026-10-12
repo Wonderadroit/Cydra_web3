@@ -125,13 +125,20 @@ contract CoWSetManagerTest {
         for (uint256 i; i < logs.length; ++i) {
             if (
                 logs[i].emitter == PROXY &&
-                logs[i].topics.length == 3 &&
+                logs[i].topics.length == 1 &&
                 logs[i].topics[0] == signature &&
-                address(uint160(uint256(logs[i].topics[1]))) == newManager &&
-                address(uint160(uint256(logs[i].topics[2]))) == oldManager
+                logs[i].data.length == 64 &&
+                _eventAddressesMatch(logs[i].data, newManager, oldManager)
             ) return true;
         }
         return false;
+    }
+
+    function _eventAddressesMatch(bytes memory data, address newManager, address oldManager)
+        private pure returns (bool)
+    {
+        (address emittedNewManager, address emittedOldManager) = abi.decode(data, (address, address));
+        return emittedNewManager == newManager && emittedOldManager == oldManager;
     }
 
     function _decodeErrorString(bytes memory data) private pure returns (string memory) {
