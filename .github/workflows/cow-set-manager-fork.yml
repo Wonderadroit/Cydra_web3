@@ -1,0 +1,104 @@
+name: CoW setManager pinned fork experiment
+
+on:
+  push:
+    branches:
+      - "experiment/cow-set-manager-fork"
+  pull_request:
+    paths:
+      - ".github/workflows/cow-set-manager-fork.yml"
+      - "experiments/cow-set-manager/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fork-experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: experiments/cow-set-manager
+    env:
+      MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+      - name: Select an available public RPC if no secret was configured
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidates=("${MAINNET_RPC_URL:-}" "https://ethereum.publicnode.com" "https://eth.llamarpc.com" "https://rpc.ankr.com/eth" "https://eth.api.onfinality.io/public")
+          for endpoint in "${candidates[@]}"; do
+            [[ -n "$endpoint" ]] || continue
+            chain_id=$(cast chain-id --rpc-url "$endpoint" 2>/dev/null || true)
+            [[ "$chain_id" == "1" ]] || continue
+            latest=$(cast block-number --rpc-url "$endpoint" 2>/dev/null || true)
+            [[ "$latest" =~ ^[0-9]+$ ]] || continue
+            pin=$((latest - 64))
+            (( pin > 0 )) || continue
+            # Verify the endpoint can serve the exact pinned block before selecting it.
+            cast block "$pin" --rpc-url "$endpoint" >/dev/null 2>&1 || continue
+            {
+              echo "MAINNET_RPC_URL=$endpoint"
+              echo "FORK_BLOCK_NUMBER=$pin"
+            } >> "$GITHUB_ENV"
+            echo "Selected Ethereum mainnet RPC and pinned block $pin (latest minus 64)."
+            exit 0
+          done
+          echo "No configured/public Ethereum RPC could serve a recent pinned block." >&2
+          exit 1
+      - name: Check deployed runtime for ManagerChanged event topic
+        shell: bash
+        run: |
+          set -euo pipefail
+          implementation="0xFeDbc87123caF3925145e1bD1Be844c03b36722f"
+          code="$(cast code "$implementation" --rpc-url "$MAINNET_RPC_URL")"
+          topic="$(cast keccak "ManagerChanged(address,address)")"
+          echo "Implementation: $implementation"
+          echo "Runtime bytecode bytes: $(( (${#code} - 2) / 2 ))"
+          echo "Expected event topic: $topic"
+          if [[ "$code" == *"${topic#0x}"* ]]; then
+            echo "TOPIC_PRESENT=true"
+          else
+            echo "TOPIC_PRESENT=false"
+          fi
+      - name: Run the one pinned CoW authorization experiment
+        run: |
+          set -o pipefail
+          forge test --match-contract CoWSetManagerTest --fork-url "$MAINNET_RPC_URL" --fork-block-number "$FORK_BLOCK_NUMBER" -vvv 2>&1 | tee cow-set-manager-run.log
+      - name: Run the bounded CoW addSolver authorization experiment
+        run: |
+          set -o pipefail
+          forge test --match-contract CoWAddSolverTest --fork-url "$MAINNET_RPC_URL" --fork-block-number "$FORK_BLOCK_NUMBER" -vvv 2>&1 | tee cow-add-solver-run.log
+      - name: Run the bounded CoW removeSolver authorization experiment
+        run: |
+          set -o pipefail
+          forge test --match-contract CoWRemoveSolverTest --fork-url "$MAINNET_RPC_URL" --fork-block-number "$FORK_BLOCK_NUMBER" -vvv 2>&1 | tee cow-remove-solver-run.log
+      - name: Run the CoW initializeManager replay experiment
+        run: |
+          set -o pipefail
+          forge test --match-contract CoWInitializeManagerTest --fork-url "$MAINNET_RPC_URL" --fork-block-number "$FORK_BLOCK_NUMBER" -vvv 2>&1 | tee cow-initialize-manager-run.log
+      - name: Run removed-solver settlement cross-function experiment
+        run: |
+          set -o pipefail
+          forge test --match-contract CoWRemovedSolverSettlementTest --fork-url "$MAINNET_RPC_URL" --fork-block-number "$FORK_BLOCK_NUMBER" -vvv 2>&1 | tee cow-removed-solver-settlement-run.log
+      - name: Upload experiment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cow-authorization-fork-evidence
+          path: |
+            experiments/cow-set-manager/cow-set-manager-evidence.json
+            experiments/cow-set-manager/cow-add-solver-evidence.json
+            experiments/cow-set-manager/cow-remove-solver-evidence.json
+            experiments/cow-set-manager/cow-initialize-manager-evidence.json
+            experiments/cow-set-manager/cow-removed-solver-settlement-evidence.json
+            experiments/cow-set-manager/cow-set-manager-run.log
+            experiments/cow-set-manager/cow-add-solver-run.log
+            experiments/cow-set-manager/cow-remove-solver-run.log
+            experiments/cow-set-manager/cow-initialize-manager-run.log
+            experiments/cow-set-manager/cow-removed-solver-settlement-run.log
+          if-no-files-found: warn
+          retention-days: 14
