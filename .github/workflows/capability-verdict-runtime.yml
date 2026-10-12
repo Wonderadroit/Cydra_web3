@@ -19,12 +19,21 @@ jobs:
       - name: Install Foundry test utilities
         working-directory: tests/fixtures/capability_verdict_runtime
         run: forge install foundry-rs/forge-std --no-commit
-      - name: Execute four runtime verdict fixtures
+      - name: Generate four tests through CYDRA's authorization harness generator
+        env:
+          PYTHONPATH: src
+        run: python scripts/generate_capability_verdict_controls.py
+      - name: Execute four hand-authored runtime fixtures
         working-directory: tests/fixtures/capability_verdict_runtime
         run: |
           set -o pipefail
-          forge test -vv 2>&1 | tee "$RUNNER_TEMP/capability-verdict-runtime.log"
-      - name: Record structured verdict artifact
+          forge test --match-path 'test/VerdictRuntime.t.sol' -vv 2>&1 | tee "$RUNNER_TEMP/capability-verdict-fixtures.log"
+      - name: Execute four generated authorization harnesses
+        working-directory: tests/fixtures/capability_verdict_runtime
+        run: |
+          set -o pipefail
+          forge test --match-path 'test/generated/.*\.t\.sol' -vv 2>&1 | tee "$RUNNER_TEMP/capability-verdict-runtime.log"
+      - name: Record structured generated-harness verdict artifact
         if: always()
         run: |
           python scripts/record_capability_verdict_artifact.py \
@@ -36,6 +45,7 @@ jobs:
         with:
           name: cydra-capability-verdict-runtime
           path: |
+            ${{ runner.temp }}/capability-verdict-fixtures.log
             ${{ runner.temp }}/capability-verdict-runtime.log
             ${{ runner.temp }}/capability-verdict-runtime.json
           if-no-files-found: warn
