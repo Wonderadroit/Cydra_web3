@@ -30,7 +30,7 @@ def _seed_coverage_allows_measurement(hypotheses, seeds) -> bool:
 
 
 def _prepare_isolated_foundry_project(target_root: Path, source: Path, destination: Path) -> Path:
-    """Copy only the target's local Solidity import closure into a clean Foundry root."""
+    """Stage the target source and complete Foundry library tree in an isolated root."""
     source_root = next(
         (
             candidate
@@ -43,6 +43,17 @@ def _prepare_isolated_foundry_project(target_root: Path, source: Path, destinati
     src_root.mkdir(parents=True, exist_ok=True)
     test_root = destination / "test" / "generated"
     test_root.mkdir(parents=True, exist_ok=True)
+
+    # Preserve Foundry libraries at their repository-root paths. Remappings only
+    # describe paths; they cannot compensate for dependency sources absent here.
+    target_lib = target_root / "lib"
+    if target_lib.is_dir():
+        shutil.copytree(
+            target_lib,
+            destination / "lib",
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns(".git"),
+        )
 
     pending = [source]
     copied: set[Path] = set()
@@ -89,10 +100,13 @@ def _prepare_isolated_foundry_project(target_root: Path, source: Path, destinati
 
     remapping_lines = []
     for prefix, destination_path in remappings:
-        # Remapped dependencies under node_modules live at the Foundry root;
-        # source-tree dependencies copied by the closure live under src/.
-        remapped_root = "node_modules" if destination_path.startswith("node_modules/") else "src"
-        remapping_lines.append(f"{prefix}={remapped_root}/{destination_path}")
+        # Keep repository-root dependency paths rooted at the isolated project.
+        # Only target source-tree remappings need the src/ prefix.
+        if destination_path.startswith(("lib/", "node_modules/")):
+            remapped_path = destination_path
+        else:
+            remapped_path = f"src/{destination_path}"
+        remapping_lines.append(f"{prefix}={remapped_path}")
     remapping_literal = ", ".join(repr(item) for item in remapping_lines)
     (destination / "foundry.toml").write_text(
         '[profile.default]\n'
