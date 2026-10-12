@@ -193,12 +193,12 @@ def test_seed_generator_keeps_protected_state_writer_as_question(tmp_path: Path)
 def test_modifier_name_without_caller_guard_does_not_suppress_seed_candidate(tmp_path: Path):
     source = tmp_path / "FakeProtected.sol"
     source.write_text(
-        "pragma solidity ^0.8.20;\\n"
-        "contract FakeProtected {\\n"
-        "  address public manager;\\n"
-        "  modifier onlyOwner() { _; }\\n"
-        "  function configure(address next) external onlyOwner { manager = next; }\\n"
-        "}\\n",
+        "pragma solidity ^0.8.20;\n"
+        "contract FakeProtected {\n"
+        "  address public manager;\n"
+        "  modifier onlyOwner() { _; }\n"
+        "  function configure(address next) external onlyOwner { manager = next; }\n"
+        "}\n",
         encoding="utf-8",
     )
 
@@ -211,13 +211,13 @@ def test_modifier_name_without_caller_guard_does_not_suppress_seed_candidate(tmp
 def test_caller_guarded_modifier_suppresses_seed_candidate(tmp_path: Path):
     source = tmp_path / "ActuallyProtected.sol"
     source.write_text(
-        "pragma solidity ^0.8.20;\\n"
-        "contract ActuallyProtected {\\n"
-        "  address public owner;\\n"
-        "  address public manager;\\n"
-        "  modifier onlyOwner() { require(msg.sender == owner, 'owner'); _; }\\n"
-        "  function configure(address next) external onlyOwner { manager = next; }\\n"
-        "}\\n",
+        "pragma solidity ^0.8.20;\n"
+        "contract ActuallyProtected {\n"
+        "  address public owner;\n"
+        "  address public manager;\n"
+        "  modifier onlyOwner() { require(msg.sender == owner, 'owner'); _; }\n"
+        "  function configure(address next) external onlyOwner { manager = next; }\n"
+        "}\n",
         encoding="utf-8",
     )
 
