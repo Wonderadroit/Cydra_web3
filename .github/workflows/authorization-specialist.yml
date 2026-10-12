@@ -143,7 +143,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          candidates=(" ${MAINNET_RPC_URL:-}" "https://ethereum.publicnode.com" "https://eth.llamarpc.com" "https://rpc.ankr.com/eth" "https://eth.api.onfinality.io/public")
+          candidates=("${MAINNET_RPC_URL:-}" "https://ethereum.publicnode.com" "https://eth.llamarpc.com" "https://rpc.ankr.com/eth" "https://eth.api.onfinality.io/public")
           for endpoint in "${candidates[@]}"; do
             [[ -n "$endpoint" ]] || continue
             chain_id=$(cast chain-id --rpc-url "$endpoint" 2>/dev/null || true)
