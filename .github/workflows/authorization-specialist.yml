@@ -170,6 +170,8 @@ jobs:
         run: forge test --match-contract CoWRemoveSolverTest --fork-url "$MAINNET_RPC_URL" --fork-block-number "$FORK_BLOCK_NUMBER" -vvv 2>&1 | tee cow-remove-solver-run.log
       - name: Run initializeManager replay control
         run: forge test --match-contract CoWInitializeManagerTest --fork-url "$MAINNET_RPC_URL" --fork-block-number "$FORK_BLOCK_NUMBER" -vvv 2>&1 | tee cow-initialize-manager-run.log
+      - name: Run removed-solver settlement cross-function control
+        run: forge test --match-contract CoWRemovedSolverSettlementTest --fork-url "$MAINNET_RPC_URL" --fork-block-number "$FORK_BLOCK_NUMBER" -vvv 2>&1 | tee cow-removed-solver-settlement-run.log
       - name: Upload fork experiment evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -180,9 +182,11 @@ jobs:
             experiments/cow-set-manager/cow-add-solver-evidence.json
             experiments/cow-set-manager/cow-remove-solver-evidence.json
             experiments/cow-set-manager/cow-initialize-manager-evidence.json
+            experiments/cow-set-manager/cow-removed-solver-settlement-evidence.json
             experiments/cow-set-manager/cow-set-manager-run.log
             experiments/cow-set-manager/cow-add-solver-run.log
             experiments/cow-set-manager/cow-remove-solver-run.log
             experiments/cow-set-manager/cow-initialize-manager-run.log
+            experiments/cow-set-manager/cow-removed-solver-settlement-run.log
           if-no-files-found: warn
           retention-days: 14
