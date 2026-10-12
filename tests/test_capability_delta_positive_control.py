@@ -66,6 +66,11 @@ def test_positive_control_detects_new_role_membership(tmp_path: Path):
     assert "target.hasRole(target.DEFAULT_ADMIN_ROLE(), address(attacker))" in generated
     assert "bool hadRoleBefore" in generated
     assert "bool hasRoleAfter" in generated
-    assert "if (!hadRoleBefore && hasRoleAfter)" in generated
-    assert 'emit CydraVerdict("supported")' in generated
-    assert "CYDRA_SECURITY_ASSERTION: unauthorized caller gained DEFAULT_ADMIN_ROLE" in generated
+    assert "enum Verdict { None, Supported, Rejected, Inconclusive, Unmeasurable }" in generated
+    assert "Verdict public verdict;" in generated
+    assert "bool public deployed;" in generated
+    assert "if (!hadRoleBefore && hasRoleAfter) verdict = Verdict.Supported;" in generated
+    assert "assert(verdict != Verdict.None" in generated
+    assert "emit CydraVerdict" not in generated
+    assert "require(false" not in generated
+    assert "hadRoleBefore != hasRoleAfter" in generated
