@@ -18,6 +18,7 @@ class AuthorizationBlindOutcome:
     internal_status: str
     benchmark_status: str
     verdict: str
+    verdict_reason: str | None = None
 
 
 def _security_assertion_failed(execution: ExecutionResult) -> bool:
@@ -46,6 +47,9 @@ def classify_authorization_blind_execution(
     )
     raw_verdict = matches[-1].lower() if matches else None
     verdict = labels.get(raw_verdict, raw_verdict) if raw_verdict is not None else None
+
+    reason_match = re.findall(r"CYDRA_VERDICT_REASON[:\\s]+([a-zA-Z0-9_ -]+)", output, re.IGNORECASE)
+    verdict_reason = reason_match[-1].strip().lower().replace(" ", "_") if reason_match else None
 
     if verdict == "supported":
         semantics = "unauthorized_authority_gain"
@@ -96,6 +100,6 @@ def classify_authorization_blind_execution(
         hypothesis.related_functions,
     )
     return AuthorizationBlindOutcome(
-        updated, execution, evidence, internal_status, benchmark_status, verdict
+        updated, execution, evidence, internal_status, benchmark_status, verdict, verdict_reason
     )
 
