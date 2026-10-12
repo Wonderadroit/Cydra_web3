@@ -32,18 +32,27 @@ jobs:
           candidates=("${MAINNET_RPC_URL:-}" "https://ethereum.publicnode.com" "https://eth.llamarpc.com" "https://rpc.ankr.com/eth" "https://eth.api.onfinality.io/public")
           for endpoint in "${candidates[@]}"; do
             [[ -n "$endpoint" ]] || continue
-            if cast chain-id --rpc-url "$endpoint" 2>/dev/null | grep -qx '1'; then
-              echo "MAINNET_RPC_URL=$endpoint" >> "$GITHUB_ENV"
-              echo "Selected an Ethereum mainnet RPC endpoint."
-              exit 0
-            fi
+            chain_id=$(cast chain-id --rpc-url "$endpoint" 2>/dev/null || true)
+            [[ "$chain_id" == "1" ]] || continue
+            latest=$(cast block-number --rpc-url "$endpoint" 2>/dev/null || true)
+            [[ "$latest" =~ ^[0-9]+$ ]] || continue
+            pin=$((latest - 64))
+            (( pin > 0 )) || continue
+            # Verify the endpoint can serve the exact pinned block before selecting it.
+            cast block "$pin" --rpc-url "$endpoint" >/dev/null 2>&1 || continue
+            {
+              echo "MAINNET_RPC_URL=$endpoint"
+              echo "FORK_BLOCK_NUMBER=$pin"
+            } >> "$GITHUB_ENV"
+            echo "Selected Ethereum mainnet RPC and pinned block $pin (latest minus 64)."
+            exit 0
           done
-          echo "No configured/public Ethereum mainnet RPC endpoint responded." >&2
+          echo "No configured/public Ethereum RPC could serve a recent pinned block." >&2
           exit 1
       - name: Run the one pinned CoW authorization experiment
         run: |
           set -o pipefail
-          forge test --match-contract CoWSetManagerTest --fork-url "$MAINNET_RPC_URL" --fork-block-number 15500000 -vvv 2>&1 | tee cow-set-manager-run.log
+          forge test --match-contract CoWSetManagerTest --fork-url "$MAINNET_RPC_URL" --fork-block-number "$FORK_BLOCK_NUMBER" -vvv 2>&1 | tee cow-set-manager-run.log
       - name: Upload experiment evidence
         if: always()
         uses: actions/upload-artifact@v4
