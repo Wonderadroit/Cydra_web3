@@ -72,6 +72,10 @@ jobs:
         run: |
           set -o pipefail
           forge test --match-contract CoWAddSolverTest --fork-url "$MAINNET_RPC_URL" --fork-block-number "$FORK_BLOCK_NUMBER" -vvv 2>&1 | tee cow-add-solver-run.log
+      - name: Run the bounded CoW removeSolver authorization experiment
+        run: |
+          set -o pipefail
+          forge test --match-contract CoWRemoveSolverTest --fork-url "$MAINNET_RPC_URL" --fork-block-number "$FORK_BLOCK_NUMBER" -vvv 2>&1 | tee cow-remove-solver-run.log
       - name: Upload experiment evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -80,7 +84,9 @@ jobs:
           path: |
             experiments/cow-set-manager/cow-set-manager-evidence.json
             experiments/cow-set-manager/cow-add-solver-evidence.json
+            experiments/cow-set-manager/cow-remove-solver-evidence.json
             experiments/cow-set-manager/cow-set-manager-run.log
             experiments/cow-set-manager/cow-add-solver-run.log
+            experiments/cow-set-manager/cow-remove-solver-run.log
           if-no-files-found: warn
           retention-days: 14
