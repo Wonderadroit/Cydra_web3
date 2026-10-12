@@ -40,7 +40,7 @@ def classify_authorization_blind_execution(
         "4": "unmeasurable",
     }
     matches = re.findall(
-        r"CYDRA_VERDICT[:\\s]+(supported|rejected|inconclusive|unmeasurable|[0-4])",
+        r"CYDRA_VERDICT[:\s]+(supported|rejected|inconclusive|unmeasurable|[0-4])",
         output,
         re.IGNORECASE,
     )
