@@ -119,14 +119,14 @@ def generate_blind_authorization_test_from_experiment(
 
     # Only a single source-grounded revert string is accepted as a guard oracle.
     guard_strings = set(re.findall(
-        r"(?:require|revert)\\s*\\([^;]*?[\"']([^\"']{3,})[\"']",
+        r"(?:require|revert)\s*\([^;]*?[\"']([^\"']{3,})[\"']",
         source_text,
         re.DOTALL,
     ))
     expected_guard = next(iter(guard_strings)) if len(guard_strings) == 1 else None
     guard_literal = (
         '"' + expected_guard.replace("\\", "\\\\").replace('"', '\\"') + '"'
-        if expected_guard else "bytes(\\"\\")"
+        if expected_guard else '""'
     )
 
     if role_getter:
