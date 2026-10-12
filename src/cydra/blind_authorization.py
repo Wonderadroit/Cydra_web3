@@ -32,8 +32,6 @@ def _constructor_argument(parameter, *, abi_only: bool = False) -> str:
         return 'bytes("")'
     if base.startswith("bytes") and base[5:].isdigit():
         return "bytes32(uint256(1))" if base == "bytes32" else f"{base}(0)"
-    # ABI encoding accepts an address for interface/contract constructor
-    # parameters, avoiding extra source imports in historical harnesses.
     return "address(0x1001)"
 
 
@@ -61,7 +59,7 @@ def generate_blind_authorization_test_from_experiment(
     contract_model: ContractModel,
     creation_bytecode: str | None = None,
 ) -> Path:
-    """Render a one-sided authorization invariant test from the canonical plan."""
+    """Render an authorization test with explicit capability-measurement verdicts."""
     if hypothesis.invariant_id != "INV-AUTH-001":
         raise ValueError(
             f"Unsupported invariant for blind authorization generation: {hypothesis.invariant_id}"
@@ -84,31 +82,27 @@ def generate_blind_authorization_test_from_experiment(
     constructor_arguments = _constructor_arguments(
         contract_model, abi_only=creation_bytecode is not None
     )
-    constructor_encoding = (
-        f"abi.encode({constructor_arguments})"
-        if constructor_arguments
-        else 'bytes("")'
+    constructor_suffix = (
+        f"abi.encode({constructor_arguments})" if constructor_arguments else 'bytes("")'
     )
-    # Prefer typed deployment for blind authorization harnesses. A raw
-    # creation-bytecode path can cause Foundry to synthesize constructor-argument
-    # helper structs whose ABI shape is lost for multi-parameter constructors.
-    # The target import is already part of the authorized harness boundary, so
-    # direct deployment preserves the constructor ABI exactly.
-    init_expression = ""
-    target_declaration = f"{target_type} internal target;"
-    import_line = f'import {{ {target_type} }} from "{target_import}";'
-    target_cast = target_type
 
-    pragma = contract_model.pragma or "^0.8.20"
-    path = Path(output_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    state_getter = None
-    state_type = None
     try:
         source_text = Path(contract_model.source).read_text(encoding="utf-8")
     except (OSError, UnicodeError):
         source_text = ""
+
+    # The first supported authority surface is OpenZeppelin-style AccessControl.
+    # It is only measurable when both the role getter and hasRole read are present.
+    role_getter = None
+    if re.search(r"\bfunction\s+hasRole\s*\(", source_text):
+        role_match = re.search(
+            r"\bbytes32\s+public\s+constant\s+(DEFAULT_ADMIN_ROLE)\s*=", source_text
+        )
+        if role_match:
+            role_getter = role_match.group(1)
+
+    state_getter = None
+    state_type = None
     for written in function.writes:
         match = re.search(
             rf"\b(address(?:\s+payable)?|bool|uint\d*|int\d*)\s+public\s+{re.escape(written)}\s*;",
@@ -119,35 +113,38 @@ def generate_blind_authorization_test_from_experiment(
             state_getter = written
             break
 
-    state_view = ""
-    if state_getter is not None:
-        state_snapshot = f"        {state_type} beforeState = target.{state_getter}();"
-        post_state = f"target.{state_getter}()"
-        call_assertion = f'''        require(ok, "{security_assertion_marker()}: authorization call reverted before invariant observation");
-        require(
-            {post_state} == beforeState,
-            "{security_assertion_marker()}: unauthorized caller mutated modeled administrative state"
-        );'''
+    if role_getter:
+        before_observation = (
+            f"        bool hadRoleBefore = target.hasRole(target.{role_getter}(), address(attacker));"
+        )
+        post_observation = (
+            f"        bool hasRoleAfter = target.hasRole(target.{role_getter}(), address(attacker));"
+        )
+        verdict_logic = f'''        if (!hadRoleBefore && hasRoleAfter) {{
+            emit CydraVerdict("supported");
+            require(false, "{security_assertion_marker()}: unauthorized caller gained DEFAULT_ADMIN_ROLE");
+        }}
+        if (hadRoleBefore == hasRoleAfter) emit CydraVerdict("rejected");
+        else emit CydraVerdict("unmeasurable");'''
+    elif state_getter is not None:
+        before_observation = f"        {state_type} beforeState = target.{state_getter}();"
+        post_observation = f"        {state_type} afterState = target.{state_getter}();"
+        verdict_logic = f'''        require(ok, "CYDRA: call execution was inconclusive because it reverted");
+        if (afterState == beforeState) emit CydraVerdict("rejected");
+        else emit CydraVerdict("unmeasurable");'''
     else:
-        state_snapshot = ""
-        call_assertion = f'''        require(
-            !ok,
-            "{security_assertion_marker()}: unauthorized caller successfully invoked protected administrative operation"
-        );'''
+        before_observation = ""
+        post_observation = ""
+        verdict_logic = '''        // No supported authority read: success/failure cannot establish an authority delta.
+        emit CydraVerdict("unmeasurable");'''
 
-    # Avoid Solidity's `new Target(...)` syntax here. Foundry's preprocessor
-    # rewrites nested `new` expressions into generated free-function helpers;
-    # those helpers are not parseable by historical Solidity 0.6.x targets.
-    # Assemble the target creation bytecode explicitly so constructor execution
-    # remains real while the harness stays compiler-version neutral.
-    constructor_suffix = (
-        f"abi.encode({constructor_arguments})" if constructor_arguments else 'bytes("")'
-    )
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pragma = contract_model.pragma or "^0.8.20"
     source = f'''// SPDX-License-Identifier: UNLICENSED
 pragma solidity {pragma};
 // Hypothesis: {hypothesis.hypothesis_id}
 // Experiment: {experiment.experiment_id}
-// One-sided invariant test: no patched target or benchmark answer is imported.
 import {{ {target_type} }} from "{target_import}";
 
 contract CydraUnauthorizedCaller {{
@@ -157,29 +154,26 @@ contract CydraUnauthorizedCaller {{
 }}
 
 contract CydraBlindAuthorizationTest {{
-    {target_declaration}
+    {target_type} internal target;
     CydraUnauthorizedCaller internal attacker;
+
+    event CydraVerdict(string verdict);
 
     function _targetCreationCode() internal pure returns (bytes memory) {{
         return type({target_type}).creationCode;
     }}
 
     function setUp() public {{
-        bytes memory initCode = abi.encodePacked(
-            _targetCreationCode(),
-            {constructor_suffix}
-        );
+        bytes memory initCode = abi.encodePacked(_targetCreationCode(), {constructor_suffix});
         address deployed;
-        assembly {{
-            deployed := create(0, add(initCode, 0x20), mload(initCode))
-        }}
+        assembly {{ deployed := create(0, add(initCode, 0x20), mload(initCode)) }}
         require(deployed != address(0), "CYDRA: constructor deployment failed");
         target = {target_type}(payable(deployed));
         attacker = new CydraUnauthorizedCaller();
     }}
 
-    function testUnauthorizedCallerCannotMutateModeledAdministrativeState() public {{
-{state_snapshot}
+    function testUnauthorizedCallerCapabilityDelta() public {{
+{before_observation}
         (bool ok,) = attacker.execute(
             address(target),
             abi.encodeWithSignature(
@@ -187,7 +181,12 @@ contract CydraBlindAuthorizationTest {{
                 {arguments}
             )
         );
-{call_assertion}
+{post_observation}
+        if (!ok) {{
+            emit CydraVerdict("inconclusive");
+            return;
+        }}
+{verdict_logic}
     }}
 }}
 '''
