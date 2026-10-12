@@ -376,6 +376,7 @@ def main() -> int:
     parser.add_argument("--target-project", required=True)
     parser.add_argument("--expected-status", choices=("confirmed", "not_confirmed"), default="confirmed")
     parser.add_argument("--require-ready", action="store_true")
+    parser.add_argument("--measurement-only", action="store_true", help="Record measured outcomes without enforcing the benchmark expected-status exit code.")
     parser.add_argument("--allow-no-hypothesis", action="store_true", help="Record a no-hypothesis disposition as a completed measurement rather than failing the runner.")
     parser.add_argument("--output", type=Path)
     parser.add_argument(
@@ -568,7 +569,7 @@ def main() -> int:
                 f"{hypothesis.hypothesis_id}: status={execution.status} "
                 f"classification={outcome.benchmark_status} evidence={outcome.evidence.evidence_id}"
             )
-            if outcome.benchmark_status != args.expected_status:
+            if not args.measurement_only and outcome.benchmark_status != args.expected_status:
                 return 2
             payload={"target":f"{args.target_repo}@{args.target_ref}:{args.target_path}","hypothesis_seeds":_json(getattr(result, "seeds", ())),"hypothesis":_json(hypothesis),"experiment":_json(experiment),"blind_execution":_json(execution),"classification":outcome.benchmark_status,"finding_gate":"CONFIRMED_ONLY"}
             if args.require_ready and outcome.benchmark_status=="confirmed":
