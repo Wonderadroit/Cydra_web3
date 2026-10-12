@@ -7,7 +7,7 @@ from pathlib import Path
 from .ast_dataflow import SemanticRelationshipEvidence
 from .models import ContractModel, Experiment, FunctionModel, Hypothesis, Invariant
 from .hypothesis_seeds import HypothesisSeed, generate_hypothesis_seeds
-from .reasoning import generate_access_control_hypotheses, plan_access_control_experiment
+from .reasoning import _effective_declared_modifiers, generate_access_control_hypotheses, plan_access_control_experiment
 from .solidity_model import _strip_comments, parse_solidity
 
 
@@ -129,6 +129,7 @@ def _with_transitive_internal_writes(
 def _hypotheses_from_derived_write_seeds(
     seeds: tuple[HypothesisSeed, ...],
     existing: tuple[Hypothesis, ...],
+    protected_targets: set[tuple[str, str]] | None = None,
 ) -> tuple[Hypothesis, ...]:
     """Promote source-derived write seeds into falsifiable candidates.
 
@@ -137,12 +138,14 @@ def _hypotheses_from_derived_write_seeds(
     seeds remain blocked and are deliberately not promoted here.
     """
     existing_functions = {item.target_function for item in existing}
+    protected_targets = protected_targets or set()
     candidates: list[Hypothesis] = []
     for seed in seeds:
         if (
             seed.status != "seed"
             or seed.invariant_source != "derived"
             or not seed.observed_writes
+            or (seed.target_contract, seed.target_function) in protected_targets
             or seed.target_function in existing_functions
         ):
             continue
@@ -189,7 +192,13 @@ def investigate_authorization(
     for contract in modeled:
         hypotheses.extend(generate_access_control_hypotheses(contract, semantic_evidence))
     conventional = tuple(hypotheses)
-    hypotheses.extend(_hypotheses_from_derived_write_seeds(seeds, conventional))
+    protected_targets = {
+        (contract.name, function.name)
+        for contract in modeled
+        for function in contract.functions
+        if _effective_declared_modifiers(contract, function)
+    }
+    hypotheses.extend(_hypotheses_from_derived_write_seeds(seeds, conventional, protected_targets))
     unique = {item.hypothesis_id: item for item in hypotheses}
     ordered = tuple(unique[key] for key in sorted(unique))
     experiments = tuple(plan_access_control_experiment(item) for item in ordered)
