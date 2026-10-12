@@ -6,6 +6,7 @@ pragma solidity ^0.8.20;
 interface Vm {
     struct Log { bytes32[] topics; bytes data; address emitter; }
     function createSelectFork(string calldata url, uint256 blockNumber) external returns (uint256);
+    function envOr(string calldata name, uint256 defaultValue) external returns (uint256);
     function prank(address msgSender) external;
     function load(address target, bytes32 slot) external view returns (bytes32);
     function recordLogs() external;
@@ -27,12 +28,13 @@ contract CoWSetManagerTest {
         0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103;
     bytes32 private constant IMPLEMENTATION_SLOT =
         0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
-    uint256 private constant FORK_BLOCK = 15500000;
     bytes4 private constant ERROR_STRING_SELECTOR = 0x08c379a0;
 
     function testSetManagerAuthorizationOnPinnedDeploymentBlock() external {
         string memory rpc = _rpcUrl();
-        vm.createSelectFork(rpc, FORK_BLOCK);
+        uint256 forkBlock = vm.envOr("FORK_BLOCK_NUMBER", uint256(0));
+        require(forkBlock != 0, "FORK_BLOCK_NUMBER missing");
+        vm.createSelectFork(rpc, forkBlock);
 
         uint256 chainId = block.chainid;
         address implementation = address(uint160(uint256(vm.load(PROXY, IMPLEMENTATION_SLOT))));
@@ -99,7 +101,7 @@ contract CoWSetManagerTest {
         string memory evidence = string.concat(
             "{\n",
             '  "chain_id": ', vm.toString(chainId), ",\n",
-            '  "fork_block": ', vm.toString(FORK_BLOCK), ",\n",
+            '  "fork_block": ', vm.toString(forkBlock), ",\n",
             '  "rpc_endpoint_kind": "configured_or_public_fallback",\n',
             '  "proxy": "', vm.toString(PROXY), '",\n',
             '  "implementation": "', vm.toString(implementation), '",\n',
