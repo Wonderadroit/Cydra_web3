@@ -50,11 +50,11 @@ contract CoWSetManagerTest {
         bool implementationMatchesPinnedSource = implementation == EXPECTED_IMPLEMENTATION;
 
         address nextManager = address(0xA11CE);
-        // Foundry's expectation is the authoritative event check; retain recordLogs
-        // as diagnostic evidence because the recorder returned an empty array before.
+        // Start raw log recording before configuring the expected event.
+        // The expectation is authoritative; recorded logs remain diagnostic evidence.
+        vm.recordLogs();
         vm.expectEmit(false, false, false, true, PROXY);
         emit ManagerChanged(nextManager, managerBefore);
-        vm.recordLogs();
         vm.prank(managerBefore);
         (bool managerOk, bytes memory managerRet) =
             PROXY.call(abi.encodeWithSignature("setManager(address)", nextManager));
