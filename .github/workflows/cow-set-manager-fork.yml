@@ -49,6 +49,21 @@ jobs:
           done
           echo "No configured/public Ethereum RPC could serve a recent pinned block." >&2
           exit 1
+      - name: Check deployed runtime for ManagerChanged event topic
+        shell: bash
+        run: |
+          set -euo pipefail
+          implementation="0xFeDbc87123caF3925145e1bD1Be844c03b36722f"
+          code="$(cast code "$implementation" --rpc-url "$MAINNET_RPC_URL")"
+          topic="$(cast keccak "ManagerChanged(address,address)")"
+          echo "Implementation: $implementation"
+          echo "Runtime bytecode bytes: $(( (${#code} - 2) / 2 ))"
+          echo "Expected event topic: $topic"
+          if [[ "$code" == *"${topic#0x}"* ]]; then
+            echo "TOPIC_PRESENT=true"
+          else
+            echo "TOPIC_PRESENT=false"
+          fi
       - name: Run the one pinned CoW authorization experiment
         run: |
           set -o pipefail
