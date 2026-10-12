@@ -59,7 +59,10 @@ def test_permissionless_factory_verdict_is_unmeasurable_until_authority_is_obser
     assert "function create() external" in source
 
     generated = _generate(fixture, "PermissionlessFactory", "create", ("_isChild",), tmp_path)
-    assert 'emit CydraVerdict("unmeasurable")' in generated
-    assert 'emit CydraVerdict("rejected")' not in generated
-    assert "CYDRA_SECURITY_ASSERTION" not in generated
-    assert "require(\\n            !ok" not in generated
+    assert "Verdict public verdict;" in generated
+    assert "verdict = Verdict.Unmeasurable;" in generated
+    assert "Verdict.Rejected" not in generated
+    assert "emit CydraVerdict" not in generated
+    assert "require(false" not in generated
+    assert "if (deployedAddress == address(0))" in generated
+    assert "verdict = Verdict.Inconclusive;" in generated
