@@ -144,7 +144,7 @@ contract CoWSetManagerTest {
     function _decodeErrorString(bytes memory data) private pure returns (string memory) {
         if (data.length < 68) return "";
         bytes4 selector;
-        assembly { selector := mload(add(data, 32)) }
+        assembly ("memory-safe") { selector := mload(add(data, 32)) }
         if (selector != ERROR_STRING_SELECTOR) return "";
         bytes memory payload = new bytes(data.length - 4);
         for (uint256 i; i < payload.length; ++i) payload[i] = data[i + 4];
