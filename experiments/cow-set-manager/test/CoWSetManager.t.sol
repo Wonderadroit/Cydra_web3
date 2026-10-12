@@ -42,10 +42,10 @@ contract CoWSetManagerTest {
         address managerBefore = _manager();
         bool overlap = managerBefore == admin;
 
-        // The chosen block is the proxy's recorded deployment block; fail closed if
-        // the deployment identity/state does not match the pinned deployment artifact.
+        // The workflow selects a recent RPC-supported block. Fail closed if the
+        // proxy implementation address does not match the expected deployment identity.
         require(chainId == 1, "wrong chain");
-        bool implementationMatchesPinnedSource = implementation == EXPECTED_IMPLEMENTATION;
+        bool implementationAddressMatchesExpected = implementation == EXPECTED_IMPLEMENTATION;
 
         address nextManager = address(0xA11CE);
         // Historical candidate d8d2871 has no ManagerChanged event.
@@ -82,7 +82,7 @@ contract CoWSetManagerTest {
 
         string memory judgment;
         if (
-            !implementationMatchesPinnedSource ||
+            !implementationAddressMatchesExpected ||
             !managerOk || managerAfter != nextManager ||
             (!overlap && admin != address(0) && (!adminOk || adminAfter == managerAfter))
         ) {
@@ -105,8 +105,8 @@ contract CoWSetManagerTest {
             '  "implementation": "', vm.toString(implementation), '",\n',
             '  "source_revision_candidate": "d8d2871b86f59db8164c77fb4aee37a2def6bb5d",\n',
             '  "source_revision_has_manager_changed_event": false,\n',
-            '  "implementation_matches_pinned_source": ', 
-            implementationMatchesPinnedSource ? "true" : "false", ",\n",
+            '  "implementation_address_matches_expected": ', 
+            implementationAddressMatchesExpected ? "true" : "false", ",\n",
             '  "manager_before": "', vm.toString(managerBefore), '",\n',
             '  "admin_slot_raw": "', _hex32(adminSlotRaw), '",\n',
             '  "admin_address": "', vm.toString(admin), '",\n',
