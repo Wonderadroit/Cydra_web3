@@ -137,3 +137,54 @@ def test_inherited_modifier_counts_only_when_override_calls_super(tmp_path: Path
     )
     hypotheses = generate_access_control_hypotheses(contract)
     assert {item.hypothesis_id for item in hypotheses} == {"H-AUTH-setTreasury"}
+
+
+def test_lifecycle_write_emits_blocked_seed_even_without_supported_hypothesis(tmp_path: Path):
+    from cydra.hypothesis_seeds import generate_hypothesis_seeds
+
+    source = tmp_path / "Manager.sol"
+    source.write_text(
+        "pragma solidity ^0.8.20;\n"
+        "contract Manager {\n"
+        "  address public manager;\n"
+        "  function initializeManager(address next) external { manager = next; }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    result = investigate_authorization(source, target="manager-control@pinned")
+    seeds = generate_hypothesis_seeds(result.contracts)
+
+    assert any(
+        seed.target_function == "initializeManager"
+        and "manager" in seed.question
+        and "manager" in seed.invariant
+        and "changes" in seed.falsification
+        and seed.status == "blocked"
+        and "initialization_state" in seed.preconditions_needed
+        for seed in seeds
+    )
+    # Seed generation is independent from the existing exploit-candidate filter.
+    assert result.seeds
+    assert any(seed.target_function == "initializeManager" for seed in result.seeds)
+
+
+def test_seed_generator_keeps_protected_state_writer_as_question(tmp_path: Path):
+    from cydra.hypothesis_seeds import generate_hypothesis_seeds
+
+    source = tmp_path / "Protected.sol"
+    source.write_text(
+        "pragma solidity ^0.8.20;\n"
+        "contract Protected {\n"
+        "  address public owner;\n"
+        "  address public manager;\n"
+        "  modifier onlyOwner() { require(msg.sender == owner, 'owner'); _; }\n"
+        "  function setManager(address next) external onlyOwner { manager = next; }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    result = investigate_authorization(source)
+    seeds = generate_hypothesis_seeds(result.contracts)
+    assert any(seed.target_function == "setManager" for seed in seeds)
+    assert all("vulnerable" not in seed.question.lower() for seed in seeds)

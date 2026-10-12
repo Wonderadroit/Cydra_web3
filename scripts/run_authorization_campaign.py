@@ -23,6 +23,11 @@ from cydra.reasoning import (
 
 _IMPORT_RE = re.compile(r'''\bimport\s+(?:[^\"']+\s+from\s+)?[\"']([^\"']+)[\"']\s*;''')
 
+def _seed_coverage_allows_measurement(hypotheses, seeds) -> bool:
+    """Seed coverage is a successful measurement, never finding readiness."""
+    return not hypotheses and bool(seeds)
+
+
 
 def _prepare_isolated_foundry_project(target_root: Path, source: Path, destination: Path) -> Path:
     """Copy only the target's local Solidity import closure into a clean Foundry root."""
@@ -348,6 +353,7 @@ def _no_hypothesis_payload(target, compiler, result, related_intent_parity_hypot
             for item in compiler.constraints
         ],
         "invariants": _json(result.invariants),
+        "hypothesis_seeds": _json(getattr(result, "seeds", ())),
         "hypotheses": [],
         "related_intent_parity_hypotheses": related,
         "classification": "UNSUPPORTED_INTENT_PARITY_HYPOTHESIS" if has_related else "NO_AUTH_HYPOTHESIS",
@@ -436,9 +442,18 @@ def main() -> int:
                 args.output.parent.mkdir(parents=True, exist_ok=True)
                 args.output.write_text(json.dumps(_json(payload), indent=2) + "\n", encoding="utf-8")
             print("DISPOSITION", payload["disposition"], "finding_gate=", payload["finding_gate"])
+            if _seed_coverage_allows_measurement(hypotheses, result.seeds):
+                payload["measurement_status"] = "SEEDS_READY_NO_AUTH_HYPOTHESIS"
+                payload["seed_count"] = len(result.seeds)
+                payload["finding_gate"] = "NOT_READY"
+                if args.output:
+                    args.output.parent.mkdir(parents=True, exist_ok=True)
+                    args.output.write_text(json.dumps(_json(payload), indent=2) + "\n", encoding="utf-8")
+                print("SEED_COVERAGE", len(result.seeds), "measurement=PASS", "finding_gate=NOT_READY")
+                return 0
             if args.allow_no_hypothesis:
                 return 0
-            raise SystemExit("blind authorization backtest produced no authorization hypothesis")
+            raise SystemExit("blind authorization backtest produced no authorization hypothesis or measurable seed coverage")
 
         for dependency in args.target_npm_dependency:
             subprocess.run(
@@ -524,6 +539,7 @@ def main() -> int:
                 outcome = classify_authorization_blind_execution(hypothesis, execution)
                 payload = {
                     "target": f"{args.target_repo}@{args.target_ref}:{args.target_path}",
+                    "hypothesis_seeds": _json(getattr(result, "seeds", ())),
                     "hypothesis": _json(hypothesis),
                     "experiment": _json(experiment),
                     "blind_execution": _json(execution),
@@ -554,7 +570,7 @@ def main() -> int:
             )
             if outcome.benchmark_status != args.expected_status:
                 return 2
-            payload={"target":f"{args.target_repo}@{args.target_ref}:{args.target_path}","hypothesis":_json(hypothesis),"experiment":_json(experiment),"blind_execution":_json(execution),"classification":outcome.benchmark_status,"finding_gate":"CONFIRMED_ONLY"}
+            payload={"target":f"{args.target_repo}@{args.target_ref}:{args.target_path}","hypothesis_seeds":_json(getattr(result, "seeds", ())),"hypothesis":_json(hypothesis),"experiment":_json(experiment),"blind_execution":_json(execution),"classification":outcome.benchmark_status,"finding_gate":"CONFIRMED_ONLY"}
             if args.require_ready and outcome.benchmark_status=="confirmed":
                 isolated_source = execution_project / "src" / source_relative
                 auth_context = "\n".join(
