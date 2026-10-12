@@ -76,12 +76,12 @@ jobs:
           PYTHONPATH: src
         run: |
           set -o pipefail
-          python scripts/run_authorization_campaign.py \
+          python scripts/run_authorization_scope_campaign.py \
             --target-repo "https://github.com/3FLabs/grunt" \
             --target-ref "96a18e376e8f95bbb243a774609945749d3a0b3e" \
             --target-path "src" \
             --target-project "." \
-            --output "$RUNNER_TEMP/grunt-after-verdict-calibration.json" \
+            --output-dir "$RUNNER_TEMP/grunt-after-verdict-calibration" \
             2>&1 | tee "$RUNNER_TEMP/grunt-after-verdict-calibration.log"
       - name: Upload pinned Grunt comparison evidence
         if: always()
@@ -89,7 +89,7 @@ jobs:
         with:
           name: cydra-grunt-after-verdict-calibration
           path: |
-            ${{ runner.temp }}/grunt-after-verdict-calibration.json
+            ${{ runner.temp }}/grunt-after-verdict-calibration/
             ${{ runner.temp }}/grunt-after-verdict-calibration.log
           if-no-files-found: warn
           retention-days: 14
