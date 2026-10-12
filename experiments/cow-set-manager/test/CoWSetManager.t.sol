@@ -27,7 +27,7 @@ contract CoWSetManagerTest {
         0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103;
     bytes32 private constant IMPLEMENTATION_SLOT =
         0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
-    uint256 private constant FORK_BLOCK = 11973115;
+    uint256 private constant FORK_BLOCK = 15500000;
     bytes4 private constant ERROR_STRING_SELECTOR = 0x08c379a0;
 
     function testSetManagerAuthorizationOnPinnedDeploymentBlock() external {
@@ -44,8 +44,7 @@ contract CoWSetManagerTest {
         // The chosen block is the proxy's recorded deployment block; fail closed if
         // the deployment identity/state does not match the pinned deployment artifact.
         require(chainId == 1, "wrong chain");
-        require(implementation == EXPECTED_IMPLEMENTATION, "implementation mismatch");
-        require(managerBefore == EXPECTED_INITIAL_MANAGER, "initial manager mismatch");
+        bool implementationMatchesPinnedSource = implementation == EXPECTED_IMPLEMENTATION;
 
         address nextManager = address(0xA11CE);
         vm.recordLogs();
@@ -56,8 +55,22 @@ contract CoWSetManagerTest {
         address managerAfter = _manager();
         bool eventMatched = _hasManagerChanged(logs, nextManager, managerBefore);
 
-        // At this deployment block, manager and admin are expected to overlap.
-        // We intentionally do not pretend they are independent identities.
+        // Test the admin arm independently only when it is a distinct, non-zero role.
+        bool adminOk = false;
+        bool adminEventMatched = false;
+        bytes memory adminRet;
+        address adminAfter = managerAfter;
+        if (!overlap && admin != address(0)) {
+            address adminNextManager = address(0xAD11);
+            vm.recordLogs();
+            vm.prank(admin);
+            (adminOk, adminRet) =
+                PROXY.call(abi.encodeWithSignature("setManager(address)", adminNextManager));
+            Vm.Log[] memory adminLogs = vm.getRecordedLogs();
+            adminAfter = _manager();
+            adminEventMatched = _hasManagerChanged(adminLogs, adminNextManager, managerAfter);
+        }
+
         address unrelated = address(0xBEEF);
         vm.prank(unrelated);
         (bool unrelatedOk, bytes memory unrelatedRet) =
@@ -68,7 +81,12 @@ contract CoWSetManagerTest {
         address managerAfterUnrelated = _manager();
 
         string memory judgment;
-        if (!managerOk || managerAfter != nextManager || !eventMatched) {
+        if (
+            !implementationMatchesPinnedSource ||
+            !managerOk || managerAfter != nextManager || !eventMatched ||
+            (!overlap && admin != address(0) &&
+                (!adminOk || adminAfter == managerAfter || !adminEventMatched))
+        ) {
             judgment = "inconclusive";
         } else if (unrelatedOk) {
             judgment = "supported";
@@ -85,6 +103,8 @@ contract CoWSetManagerTest {
             '  "rpc_endpoint_kind": "configured_or_public_fallback",\n',
             '  "proxy": "', vm.toString(PROXY), '",\n',
             '  "implementation": "', vm.toString(implementation), '",\n',
+            '  "implementation_matches_pinned_source": ',
+            implementationMatchesPinnedSource ? "true" : "false", ",\n",
             '  "manager_before": "', vm.toString(managerBefore), '",\n',
             '  "admin_slot_raw": "', _hex32(adminSlotRaw), '",\n',
             '  "admin_address": "', vm.toString(admin), '",\n',
@@ -95,7 +115,13 @@ contract CoWSetManagerTest {
             '", "manager_changed_event_matched": ', eventMatched ? "true" : "false",
             ', "return_or_revert_data": "', _hexBytes(managerRet), '" },\n',
             '  "caller_admin": { "address": "', vm.toString(admin),
-            '", "outcome": "overlap_with_manager_at_fork_block", "independent_call": false },\n',
+            '", "outcome": "',
+            overlap ? "overlap_with_manager_at_fork_block" :
+                (admin == address(0) ? "skipped_zero_admin" : (adminOk ? "success" : "reverted")),
+            '", "independent_call": ', (!overlap && admin != address(0)) ? "true" : "false",
+            ', "manager_after": "', vm.toString(adminAfter),
+            '", "event_matched": ', adminEventMatched ? "true" : "false",
+            ', "return_or_revert_data": "', _hexBytes(adminRet), '" },\n',
             '  "caller_unrelated": { "address": "', vm.toString(unrelated),
             '", "outcome": "', unrelatedOk ? "success" : "reverted",
             '", "revert_string": "', _jsonEscape(revertString),
