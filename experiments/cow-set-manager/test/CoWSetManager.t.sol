@@ -10,7 +10,7 @@ interface Vm {
     function prank(address msgSender) external;
     function load(address target, bytes32 slot) external view returns (bytes32);
     function recordLogs() external;
-    function getRecordedLogs() external returns (Log[] memory);
+    function getRecordedLogs() external view returns (Log[] memory);
     function writeFile(string calldata path, string calldata data) external;
     function toString(address value) external pure returns (string memory);
     function toString(uint256 value) external pure returns (string memory);
