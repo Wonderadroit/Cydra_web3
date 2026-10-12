@@ -1,0 +1,56 @@
+name: CoW setManager pinned fork experiment
+
+on:
+  push:
+    branches:
+      - "experiment/cow-set-manager-fork"
+  pull_request:
+    paths:
+      - ".github/workflows/cow-set-manager-fork.yml"
+      - "experiments/cow-set-manager/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fork-experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: experiments/cow-set-manager
+    env:
+      MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+      - name: Select an available public RPC if no secret was configured
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidates=("${MAINNET_RPC_URL:-}" "https://ethereum.publicnode.com" "https://eth.llamarpc.com" "https://rpc.ankr.com/eth" "https://eth.api.onfinality.io/public")
+          for endpoint in "${candidates[@]}"; do
+            [[ -n "$endpoint" ]] || continue
+            if cast chain-id --rpc-url "$endpoint" 2>/dev/null | grep -qx '1'; then
+              echo "MAINNET_RPC_URL=$endpoint" >> "$GITHUB_ENV"
+              echo "Selected an Ethereum mainnet RPC endpoint."
+              exit 0
+            fi
+          done
+          echo "No configured/public Ethereum mainnet RPC endpoint responded." >&2
+          exit 1
+      - name: Run the one pinned CoW authorization experiment
+        run: |
+          set -o pipefail
+          forge test --match-contract CoWSetManagerTest --fork-url "$MAINNET_RPC_URL" --fork-block-number 11973115 -vvv 2>&1 | tee cow-set-manager-run.log
+      - name: Upload experiment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cow-set-manager-fork-evidence
+          path: |
+            experiments/cow-set-manager/cow-set-manager-evidence.json
+            experiments/cow-set-manager/cow-set-manager-run.log
+          if-no-files-found: warn
+          retention-days: 14
