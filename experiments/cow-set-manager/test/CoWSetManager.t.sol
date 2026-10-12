@@ -10,7 +10,6 @@ interface Vm {
     function prank(address msgSender) external;
     function load(address target, bytes32 slot) external view returns (bytes32);
     function recordLogs() external;
-    function expectEmit(bool checkTopic1, bool checkTopic2, bool checkTopic3, bool checkData, address emitter) external;
     function getRecordedLogs() external view returns (Log[] memory);
     function writeFile(string calldata path, string calldata data) external;
     function toString(address value) external pure returns (string memory);
@@ -19,7 +18,6 @@ interface Vm {
 }
 
 contract CoWSetManagerTest {
-    event ManagerChanged(address newManager, address oldManager);
     Vm private constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
 
     address private constant PROXY = 0xbbfB9a525ACdd2aB3A5Eb5fc9Ab8CF53b881000e;
@@ -50,21 +48,17 @@ contract CoWSetManagerTest {
         bool implementationMatchesPinnedSource = implementation == EXPECTED_IMPLEMENTATION;
 
         address nextManager = address(0xA11CE);
-        // Start raw log recording before configuring the expected event.
-        // The expectation is authoritative; recorded logs remain diagnostic evidence.
+        // Historical candidate d8d2871 has no ManagerChanged event.
+        // State and revert behavior decide this experiment; logs are diagnostic only.
         vm.recordLogs();
-        vm.expectEmit(false, false, false, true, PROXY);
-        emit ManagerChanged(nextManager, managerBefore);
         vm.prank(managerBefore);
         (bool managerOk, bytes memory managerRet) =
             PROXY.call(abi.encodeWithSignature("setManager(address)", nextManager));
         Vm.Log[] memory logs = vm.getRecordedLogs();
         address managerAfter = _manager();
-        bool eventMatched = _hasManagerChanged(logs, nextManager, managerBefore);
 
         // Test the admin arm independently only when it is a distinct, non-zero role.
         bool adminOk = false;
-        bool adminEventMatched = false;
         bytes memory adminRet;
         address adminAfter = managerAfter;
         if (!overlap && admin != address(0)) {
@@ -75,7 +69,6 @@ contract CoWSetManagerTest {
                 PROXY.call(abi.encodeWithSignature("setManager(address)", adminNextManager));
             Vm.Log[] memory adminLogs = vm.getRecordedLogs();
             adminAfter = _manager();
-            adminEventMatched = _hasManagerChanged(adminLogs, adminNextManager, managerAfter);
         }
 
         address unrelated = address(0xBEEF);
@@ -90,14 +83,13 @@ contract CoWSetManagerTest {
         string memory judgment;
         if (
             !implementationMatchesPinnedSource ||
-            !managerOk || managerAfter != nextManager || !eventMatched ||
-            (!overlap && admin != address(0) &&
-                (!adminOk || adminAfter == managerAfter || !adminEventMatched))
+            !managerOk || managerAfter != nextManager ||
+            (!overlap && admin != address(0) && (!adminOk || adminAfter == managerAfter))
         ) {
             judgment = "inconclusive";
         } else if (unrelatedOk) {
             judgment = "supported";
-        } else if (revertMatchesGuard) {
+        } else if (revertMatchesGuard && managerAfterUnrelated == managerAfter) {
             judgment = "rejected";
         } else {
             judgment = "inconclusive";
@@ -111,19 +103,20 @@ contract CoWSetManagerTest {
             '  "rpc_endpoint_kind": "configured_or_public_fallback",\n',
             '  "proxy": "', vm.toString(PROXY), '",\n',
             '  "implementation": "', vm.toString(implementation), '",\n',
-            '  "implementation_matches_pinned_source": ',
+            '  "source_revision_candidate": "d8d2871b86f59db8164c77fb4aee37a2def6bb5d",\n',
+            '  "source_revision_has_manager_changed_event": false,\n',
+            '  "implementation_matches_pinned_source": ', 
             implementationMatchesPinnedSource ? "true" : "false", ",\n",
             '  "manager_before": "', vm.toString(managerBefore), '",\n',
             '  "admin_slot_raw": "', _hex32(adminSlotRaw), '",\n',
             '  "admin_address": "', vm.toString(admin), '",\n',
             '  "manager_admin_overlap": ', overlap ? "true" : "false", ",\n",
-            '  "manager_event_verification": "expectEmit",\n',
+            '  "manager_event_verification": "not_required_for_candidate_revision_without_event",\n',
             '  "manager_call_log_count": ', vm.toString(logs.length), ",\n",
             '  "manager_call_logs": ', managerLogsJson, ",\n",
             '  "caller_manager": { "address": "', vm.toString(managerBefore),
             '", "outcome": "', managerOk ? "success" : "reverted",
             '", "manager_after": "', vm.toString(managerAfter),
-            '", "manager_changed_event_matched": ', eventMatched ? "true" : "false",
             ', "return_or_revert_data": "', _hexBytes(managerRet), '" },\n',
             '  "caller_admin": { "address": "', vm.toString(admin),
             '", "outcome": "',
@@ -131,7 +124,6 @@ contract CoWSetManagerTest {
                 (admin == address(0) ? "skipped_zero_admin" : (adminOk ? "success" : "reverted")),
             '", "independent_call": ', (!overlap && admin != address(0)) ? "true" : "false",
             ', "manager_after": "', vm.toString(adminAfter),
-            '", "event_matched": ', adminEventMatched ? "true" : "false",
             ', "return_or_revert_data": "', _hexBytes(adminRet), '" },\n',
             '  "caller_unrelated": { "address": "', vm.toString(unrelated),
             '", "outcome": "', unrelatedOk ? "success" : "reverted",
@@ -172,31 +164,6 @@ contract CoWSetManagerTest {
         (bool ok, bytes memory data) = PROXY.staticcall(abi.encodeWithSignature("manager()"));
         require(ok && data.length >= 32, "manager() read failed");
         value = abi.decode(data, (address));
-    }
-
-    function _hasManagerChanged(
-        Vm.Log[] memory logs,
-        address newManager,
-        address oldManager
-    ) private view returns (bool) {
-        bytes32 signature = keccak256("ManagerChanged(address,address)");
-        for (uint256 i; i < logs.length; ++i) {
-            if (
-                logs[i].emitter == PROXY &&
-                logs[i].topics.length == 1 &&
-                logs[i].topics[0] == signature &&
-                logs[i].data.length == 64 &&
-                _eventAddressesMatch(logs[i].data, newManager, oldManager)
-            ) return true;
-        }
-        return false;
-    }
-
-    function _eventAddressesMatch(bytes memory data, address newManager, address oldManager)
-        private pure returns (bool)
-    {
-        (address emittedNewManager, address emittedOldManager) = abi.decode(data, (address, address));
-        return emittedNewManager == newManager && emittedOldManager == oldManager;
     }
 
     function _decodeErrorString(bytes memory data) private pure returns (string memory) {
