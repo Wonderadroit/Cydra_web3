@@ -5,7 +5,6 @@ import re
 
 from .models import ContractModel, Experiment, Hypothesis
 from .planned_call import render_function_call
-from .authorization_runtime import security_assertion_marker
 
 
 def _constructor_argument(parameter, *, abi_only: bool = False) -> str:
@@ -118,6 +117,18 @@ def generate_blind_authorization_test_from_experiment(
             state_getter = written
             break
 
+    # Only a single source-grounded revert string is accepted as a guard oracle.
+    guard_strings = set(re.findall(
+        r"(?:require|revert)\\s*\\([^;]*?[\"']([^\"']{3,})[\"']",
+        source_text,
+        re.DOTALL,
+    ))
+    expected_guard = next(iter(guard_strings)) if len(guard_strings) == 1 else None
+    guard_literal = (
+        '"' + expected_guard.replace("\\", "\\\\").replace('"', '\\"') + '"'
+        if expected_guard else "bytes(\\"\\")"
+    )
+
     if role_getter:
         before_observation = (
             f"        bool hadRoleBefore = target.hasRole(target.{role_getter}(), address(attacker));"
@@ -125,32 +136,30 @@ def generate_blind_authorization_test_from_experiment(
         post_observation = (
             f"        bool hasRoleAfter = target.hasRole(target.{role_getter}(), address(attacker));"
         )
-        verdict_logic = f'''        if (!hadRoleBefore && hasRoleAfter) {{
-            emit CydraVerdict("supported");
-            require(false, "{security_assertion_marker()}: unauthorized caller gained DEFAULT_ADMIN_ROLE");
-        }}
-        if (hadRoleBefore == hasRoleAfter) emit CydraVerdict("rejected");
-        else emit CydraVerdict("unmeasurable");'''
+        verdict_logic = f'''        if (!ok) {{
+            if (hadRoleBefore != hasRoleAfter) verdict = Verdict.Inconclusive;
+            else if (expectedGuard.length == 0) verdict = Verdict.Unmeasurable;
+            else if (keccak256(bytes(_revertReason(returnData))) == keccak256(bytes(expectedGuard))) verdict = Verdict.Rejected;
+            else verdict = Verdict.Inconclusive;
+        }} else if (!hadRoleBefore && hasRoleAfter) verdict = Verdict.Supported;
+        else if (hadRoleBefore == hasRoleAfter) verdict = Verdict.Rejected;
+        else verdict = Verdict.Inconclusive;'''
     elif ownable_supported:
         before_observation = "        address ownerBefore = target.owner();"
         post_observation = "        address ownerAfter = target.owner();"
-        verdict_logic = f'''        if (ownerBefore != address(attacker) && ownerAfter == address(attacker)) {{
-            emit CydraVerdict("supported");
-            require(false, "{security_assertion_marker()}: unauthorized caller became owner");
-        }}
-        if (ownerBefore == ownerAfter) emit CydraVerdict("rejected");
-        else emit CydraVerdict("unmeasurable");'''
-    elif state_getter is not None:
-        before_observation = f"        {state_type} beforeState = target.{state_getter}();"
-        post_observation = f"        {state_type} afterState = target.{state_getter}();"
-        verdict_logic = f'''        require(ok, "CYDRA: call execution was inconclusive because it reverted");
-        if (afterState == beforeState) emit CydraVerdict("rejected");
-        else emit CydraVerdict("unmeasurable");'''
+        verdict_logic = f'''        if (!ok) {{
+            if (ownerBefore != ownerAfter) verdict = Verdict.Inconclusive;
+            else if (expectedGuard.length == 0) verdict = Verdict.Unmeasurable;
+            else if (keccak256(bytes(_revertReason(returnData))) == keccak256(bytes(expectedGuard))) verdict = Verdict.Rejected;
+            else verdict = Verdict.Inconclusive;
+        }} else if (ownerBefore != address(attacker) && ownerAfter == address(attacker)) verdict = Verdict.Supported;
+        else if (ownerBefore == ownerAfter) verdict = Verdict.Rejected;
+        else verdict = Verdict.Inconclusive;'''
     else:
+        # A public state getter is not itself proof of an authority relationship.
         before_observation = ""
         post_observation = ""
-        verdict_logic = '''        // No supported authority read: success/failure cannot establish an authority delta.
-        emit CydraVerdict("unmeasurable");'''
+        verdict_logic = "        verdict = Verdict.Unmeasurable;"
 
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -168,27 +177,47 @@ contract CydraUnauthorizedCaller {{
 }}
 
 contract CydraBlindAuthorizationTest {{
+    enum Verdict {{ None, Supported, Rejected, Inconclusive, Unmeasurable }}
     {target_type} internal target;
     CydraUnauthorizedCaller internal attacker;
-
-    event CydraVerdict(string verdict);
+    Verdict public verdict;
+    bool public deployed;
+    string internal expectedGuard = {guard_literal};
 
     function _targetCreationCode() internal pure returns (bytes memory) {{
         return type({target_type}).creationCode;
     }}
 
+    function _revertReason(bytes memory data) internal pure returns (string memory) {{
+        if (data.length < 68) return "";
+        bytes4 selector;
+        assembly {{ selector := mload(add(data, 0x20)) }}
+        if (selector != 0x08c379a0) return "";
+        assembly {{ data := add(data, 0x04) }}
+        return abi.decode(data, (string));
+    }}
+
     function setUp() public {{
         bytes memory initCode = abi.encodePacked(_targetCreationCode(), {constructor_suffix});
-        address deployed;
-        assembly {{ deployed := create(0, add(initCode, 0x20), mload(initCode)) }}
-        require(deployed != address(0), "CYDRA: constructor deployment failed");
-        target = {target_type}(payable(deployed));
+        address deployedAddress;
+        assembly {{ deployedAddress := create(0, add(initCode, 0x20), mload(initCode)) }}
+        if (deployedAddress == address(0)) {{
+            verdict = Verdict.Inconclusive;
+            deployed = false;
+            return;
+        }}
+        target = {target_type}(payable(deployedAddress));
         attacker = new CydraUnauthorizedCaller();
+        deployed = true;
     }}
 
     function testUnauthorizedCallerCapabilityDelta() public {{
+        if (!deployed) {{
+            assert(verdict == Verdict.Inconclusive);
+            return;
+        }}
 {before_observation}
-        (bool ok,) = attacker.execute(
+        (bool ok, bytes memory returnData) = attacker.execute(
             address(target),
             abi.encodeWithSignature(
                 "{function.name}({','.join(parameter.type.split()[0] for parameter in function.parameters)})",
@@ -196,11 +225,8 @@ contract CydraBlindAuthorizationTest {{
             )
         );
 {post_observation}
-        if (!ok) {{
-            emit CydraVerdict("inconclusive");
-            return;
-        }}
 {verdict_logic}
+        assert(verdict != Verdict.None, "CYDRA: missing verdict");
     }}
 }}
 '''
