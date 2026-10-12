@@ -164,6 +164,7 @@ def generate_blind_authorization_test_from_experiment(
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     pragma = contract_model.pragma or "^0.8.20"
+    encoded_arguments = f", {arguments}" if arguments else ""
     source = f'''// SPDX-License-Identifier: UNLICENSED
 pragma solidity {pragma};
 // Hypothesis: {hypothesis.hypothesis_id}
@@ -229,8 +230,7 @@ contract CydraBlindAuthorizationTest {{
         (bool ok, bytes memory returnData) = attacker.execute(
             address(target),
             abi.encodeWithSignature(
-                "{function.name}({','.join(parameter.type.split()[0] for parameter in function.parameters)})",
-                {arguments}
+                "{function.name}({','.join(parameter.type.split()[0] for parameter in function.parameters)})"{encoded_arguments}
             )
         );
 {post_observation}
