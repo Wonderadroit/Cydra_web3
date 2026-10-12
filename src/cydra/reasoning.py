@@ -155,12 +155,26 @@ def access_control_invariant(contract: ContractModel, privileged_modifier: str |
 def generate_access_control_hypotheses(
     contract: ContractModel,
     semantic_evidence: Iterable[SemanticRelationshipEvidence] | None = None,
+    seeded_state_changers: Iterable[str] = (),
 ) -> tuple[Hypothesis, ...]:
+    """Convert eligible authorization seeds into test candidates without requiring a measurable getter.
+
+    Getter availability belongs to the execution harness: an eligible seed must
+    survive conversion so the harness can return an explicit Unmeasurable verdict.
+    Only caller-supplied, non-blocked seeds with modeled state writes are passed here.
+    """
     semantic_effects = build_state_effect_index(semantic_evidence) if semantic_evidence is not None else None
     admin_functions = _admin_named_functions(contract, semantic_effects)
-    declared = tuple((f, _effective_declared_modifiers(contract, f)) for f in admin_functions)
+    seeded_names = set(seeded_state_changers)
+    seeded_functions = tuple(
+        f for f in _state_changing_functions(contract, semantic_effects)
+        if f.name in seeded_names
+    )
+    candidate_functions = {f.name: f for f in admin_functions}
+    candidate_functions.update({f.name: f for f in seeded_functions})
+    declared = tuple((f, _effective_declared_modifiers(contract, f)) for f in candidate_functions.values())
     protected_functions = [f for f in _externally_callable_functions(contract) if _effective_declared_modifiers(contract, f)]
-    if not protected_functions and not admin_functions:
+    if not protected_functions and not declared:
         return ()
     if protected_functions:
         observed = sorted({m for f in protected_functions for m in _effective_declared_modifiers(contract, f)})
