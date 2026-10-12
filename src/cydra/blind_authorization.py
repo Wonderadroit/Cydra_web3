@@ -182,7 +182,7 @@ def generate_blind_authorization_test_from_experiment(
         # A public state getter is not itself proof of an authority relationship.
         before_observation = ""
         post_observation = ""
-        verdict_logic = "        verdict = Verdict.Unmeasurable;"
+        verdict_logic = '        verdict = Verdict.Unmeasurable; verdictReason = "no_authority_getter";'
 
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -207,6 +207,7 @@ contract CydraBlindAuthorizationTest {{
     Verdict public verdict;
     bool public deployed;
     string internal expectedGuard = {guard_literal};
+    string public verdictReason;
 
     function _targetCreationCode() internal pure returns (bytes memory) {{
         return type({target_type}).creationCode;
@@ -218,6 +219,10 @@ contract CydraBlindAuthorizationTest {{
             abi.encodeWithSignature("log(string,uint256)", "CYDRA_VERDICT", uint256(verdict))
         );
         logged;
+        (bool reasonLogged,) = consoleAddress.staticcall(
+            abi.encodeWithSignature("log(string,string)", "CYDRA_VERDICT_REASON", verdictReason)
+        );
+        reasonLogged;
     }}
 
     function _revertReason(bytes memory data) internal pure returns (string memory) {{
@@ -258,6 +263,9 @@ contract CydraBlindAuthorizationTest {{
         );
 {post_observation}
 {verdict_logic}
+        if (verdict == Verdict.Supported) verdictReason = "authority_delta_observed";
+        else if (verdict == Verdict.Rejected) verdictReason = "authority_delta_unchanged_with_guard";
+        else if (verdict == Verdict.Inconclusive && bytes(verdictReason).length == 0) verdictReason = "runtime_outcome_not_discriminating";
         assert(verdict != Verdict.None);
         _recordVerdict();
     }}
