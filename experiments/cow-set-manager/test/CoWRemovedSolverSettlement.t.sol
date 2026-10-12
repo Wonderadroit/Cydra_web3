@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-/// @notice Cross-function authorization test: a removed solver must no longer pass settlement's onlySolver gate.
+/// @notice Cross-function authorization test against the authenticator actually configured by the deployed settlement.
 /// @dev All writes occur on a local Ethereum mainnet fork; no live-chain transaction is broadcast.
 interface VmCoWCrossFunction {
     function createSelectFork(string calldata url, uint256 blockNumber) external returns (uint256);
@@ -45,10 +45,7 @@ contract CoWRemovedSolverSettlementTest {
     VmCoWCrossFunction private constant vm =
         VmCoWCrossFunction(address(uint160(uint256(keccak256("hevm cheat code")))));
 
-    address private constant AUTH_PROXY = 0xbbfB9a525ACdd2aB3A5Eb5fc9Ab8CF53b881000e;
     address private constant SETTLEMENT = 0x9008D19f58AAbD9eD0D60971565AA8510560ab41;
-    address private constant EXPECTED_IMPLEMENTATION = 0xFeDbc87123caF3925145e1bD1Be844c03b36722f;
-    address private constant EXPECTED_MANAGER = 0x6Fb5916c0f57f88004d5b5EB25f6f4D77353a1eD;
     bytes32 private constant IMPLEMENTATION_SLOT =
         0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
     bytes4 private constant ERROR_STRING_SELECTOR = 0x08c379a0;
@@ -60,26 +57,24 @@ contract CoWRemovedSolverSettlementTest {
         vm.createSelectFork(_rpcUrl(), forkBlock);
         require(block.chainid == 1, "wrong chain");
 
-        address implementation = address(uint160(uint256(vm.load(AUTH_PROXY, IMPLEMENTATION_SLOT))));
-        (bool managerReadOk, bytes memory managerData) =
-            AUTH_PROXY.staticcall(abi.encodeWithSignature("manager()"));
-        require(managerReadOk && managerData.length >= 32, "manager() read failed");
-        address manager = abi.decode(managerData, (address));
-
         (bool authReadOk, bytes memory authData) =
             SETTLEMENT.staticcall(abi.encodeWithSignature("authenticator()"));
-        address settlementAuthenticator = authReadOk && authData.length >= 32
-            ? abi.decode(authData, (address))
-            : address(0);
-        bool settlementUsesTargetAuthenticator = settlementAuthenticator == AUTH_PROXY;
-        bool implementationMatches = implementation == EXPECTED_IMPLEMENTATION;
-        bool managerMatches = manager == EXPECTED_MANAGER;
+        require(authReadOk && authData.length >= 32, "settlement authenticator read failed");
+        address authenticator = abi.decode(authData, (address));
+        require(authenticator != address(0) && authenticator.code.length > 0, "configured authenticator has no code");
+
+        address implementation = address(uint160(uint256(vm.load(authenticator, IMPLEMENTATION_SLOT))));
+        (bool managerReadOk, bytes memory managerData) =
+            authenticator.staticcall(abi.encodeWithSignature("manager()"));
+        require(managerReadOk && managerData.length >= 32, "configured manager() read failed");
+        address manager = abi.decode(managerData, (address));
+        require(manager != address(0), "configured manager is zero");
 
         address solver = address(0xA11CE);
         vm.prank(manager);
         (bool addOk, bytes memory addData) =
-            AUTH_PROXY.call(abi.encodeWithSignature("addSolver(address)", solver));
-        bool solverAllowedBefore = _isSolver(solver);
+            authenticator.call(abi.encodeWithSignature("addSolver(address)", solver));
+        bool solverAllowedBefore = _isSolver(authenticator, solver);
 
         address[] memory tokens = new address[](0);
         uint256[] memory prices = new uint256[](0);
@@ -100,8 +95,8 @@ contract CoWRemovedSolverSettlementTest {
 
         vm.prank(manager);
         (bool removeOk, bytes memory removeData) =
-            AUTH_PROXY.call(abi.encodeWithSignature("removeSolver(address)", solver));
-        bool solverAllowedAfterRemoval = _isSolver(solver);
+            authenticator.call(abi.encodeWithSignature("removeSolver(address)", solver));
+        bool solverAllowedAfterRemoval = _isSolver(authenticator, solver);
 
         vm.prank(solver);
         (bool afterOk, bytes memory afterData) = SETTLEMENT.call(
@@ -115,15 +110,14 @@ contract CoWRemovedSolverSettlementTest {
             keccak256(bytes(afterReason)) == keccak256(bytes(NOT_SOLVER));
 
         string memory judgment;
-        if (!implementationMatches || !managerMatches || !settlementUsesTargetAuthenticator ||
-            !addOk || !solverAllowedBefore || !beforePassedSolverGate ||
+        if (!addOk || !solverAllowedBefore || !beforePassedSolverGate ||
             !removeOk || solverAllowedAfterRemoval) {
             judgment = "inconclusive";
         } else if (rejectedBySolverGuard) {
             judgment = "rejected";
         } else {
-            // With valid ABI-encoded empty arguments, a post-removal call that reaches past
-            // onlySolver is a candidate cross-function authorization failure.
+            // Valid ABI-encoded empty arguments reach the onlySolver modifier.
+            // If a removed solver passes that guard, this is a cross-function candidate.
             judgment = "supported";
         }
 
@@ -131,14 +125,10 @@ contract CoWRemovedSolverSettlementTest {
             "{\n",
             '  "chain_id": ', vm.toString(block.chainid), ",\n",
             '  "fork_block": ', vm.toString(forkBlock), ",\n",
-            '  "auth_proxy": "', vm.toString(AUTH_PROXY), '",\n',
-            '  "implementation": "', vm.toString(implementation), '",\n',
-            '  "implementation_matches_expected": ', implementationMatches ? "true" : "false", ",\n",
-            '  "manager": "', vm.toString(manager), '",\n',
-            '  "manager_matches_expected": ', managerMatches ? "true" : "false", ",\n",
             '  "settlement": "', vm.toString(SETTLEMENT), '",\n',
-            '  "settlement_authenticator": "', vm.toString(settlementAuthenticator), '",\n',
-            '  "settlement_uses_target_authenticator": ', settlementUsesTargetAuthenticator ? "true" : "false", ",\n",
+            '  "configured_authenticator": "', vm.toString(authenticator), '",\n',
+            '  "configured_authenticator_implementation_slot": "', vm.toString(implementation), '",\n',
+            '  "manager": "', vm.toString(manager), '",\n',
             '  "solver": "', vm.toString(solver), '",\n',
             '  "manager_add_succeeded": ', addOk ? "true" : "false", ",\n",
             '  "solver_allowed_before": ', solverAllowedBefore ? "true" : "false", ",\n",
@@ -156,9 +146,9 @@ contract CoWRemovedSolverSettlementTest {
         vm.writeFile("cow-removed-solver-settlement-evidence.json", evidence);
     }
 
-    function _isSolver(address solver) private view returns (bool value) {
+    function _isSolver(address authenticator, address solver) private view returns (bool value) {
         (bool ok, bytes memory data) =
-            AUTH_PROXY.staticcall(abi.encodeWithSignature("isSolver(address)", solver));
+            authenticator.staticcall(abi.encodeWithSignature("isSolver(address)", solver));
         require(ok && data.length >= 32, "isSolver() read failed");
         value = abi.decode(data, (bool));
     }
