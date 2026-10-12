@@ -50,7 +50,7 @@ contract CoWInitializeManagerTest {
         bool initialManagerMatches = managerBefore == EXPECTED_INITIAL_MANAGER;
         bool stateUnchanged = managerAfter == managerBefore;
         bool expectedInitializedGuard = !callOk &&
-            keccak256(bytes(revertString)) == keccak256(bytes("Initializable: initialized"));
+            keccak256(bytes(revertString)) == keccak256(bytes("Initializable: contract is already initialized"));
 
         string memory judgment;
         if (!implementationMatches || !initialManagerMatches) {
