@@ -48,7 +48,7 @@ def classify_authorization_blind_execution(
     raw_verdict = matches[-1].lower() if matches else None
     verdict = labels.get(raw_verdict, raw_verdict) if raw_verdict is not None else None
 
-    reason_match = re.findall(r"CYDRA_VERDICT_REASON[:\\s]+([a-zA-Z0-9_ -]+)", output, re.IGNORECASE)
+    reason_match = re.findall(r"CYDRA_VERDICT_REASON[:\s]+([a-zA-Z0-9_ -]+)", output, re.IGNORECASE)
     verdict_reason = reason_match[-1].strip().lower().replace(" ", "_") if reason_match else None
 
     if verdict == "supported":
