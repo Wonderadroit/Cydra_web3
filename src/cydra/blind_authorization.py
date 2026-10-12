@@ -101,6 +101,11 @@ def generate_blind_authorization_test_from_experiment(
         if role_match:
             role_getter = role_match.group(1)
 
+    ownable_supported = bool(
+        re.search(r"\bfunction\s+owner\s*\(\s*\)", source_text)
+        and re.search(r"\bowner\s*\(\s*\)\s*(?:external|public)", source_text)
+    )
+
     state_getter = None
     state_type = None
     for written in function.writes:
@@ -125,6 +130,15 @@ def generate_blind_authorization_test_from_experiment(
             require(false, "{security_assertion_marker()}: unauthorized caller gained DEFAULT_ADMIN_ROLE");
         }}
         if (hadRoleBefore == hasRoleAfter) emit CydraVerdict("rejected");
+        else emit CydraVerdict("unmeasurable");'''
+    elif ownable_supported:
+        before_observation = "        address ownerBefore = target.owner();"
+        post_observation = "        address ownerAfter = target.owner();"
+        verdict_logic = f'''        if (ownerBefore != address(attacker) && ownerAfter == address(attacker)) {{
+            emit CydraVerdict("supported");
+            require(false, "{security_assertion_marker()}: unauthorized caller became owner");
+        }}
+        if (ownerBefore == ownerAfter) emit CydraVerdict("rejected");
         else emit CydraVerdict("unmeasurable");'''
     elif state_getter is not None:
         before_observation = f"        {state_type} beforeState = target.{state_getter}();"
