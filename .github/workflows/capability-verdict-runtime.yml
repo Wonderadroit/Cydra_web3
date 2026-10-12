@@ -52,7 +52,7 @@ jobs:
           retention-days: 14
 
   grunt-pinned-comparison:
-    if: github.sha == 'df0acca155500f5578452c79d66c1fe07abe6239'
+    if: github.ref == 'refs/heads/test/permissionless-factory-negative-control'
     needs: four-verdict-runtime
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -72,7 +72,7 @@ jobs:
             --target-ref "96a18e376e8f95bbb243a774609945749d3a0b3e" \
             --target-path "src" \
             --target-project "."
-      - name: Rerun the pinned Grunt campaign after verdict calibration
+      - name: Rerun the pinned Grunt campaign after seed-to-hypothesis separation
         env:
           PYTHONPATH: src
         run: |
