@@ -188,3 +188,21 @@ def test_seed_generator_keeps_protected_state_writer_as_question(tmp_path: Path)
     seeds = generate_hypothesis_seeds(result.contracts)
     assert any(seed.target_function == "setManager" for seed in seeds)
     assert all("vulnerable" not in seed.question.lower() for seed in seeds)
+
+
+def test_seeded_state_writer_promotes_without_authority_getter(tmp_path: Path):
+    source = tmp_path / "PermissionlessFactory.sol"
+    source.write_text(
+        "pragma solidity ^0.8.20; contract PermissionlessFactory { "
+        "mapping(address => bool) private _isChild; "
+        "function create(address child) external { _isChild[child] = true; } "
+        "}",
+        encoding="utf-8",
+    )
+
+    result = investigate_authorization(source)
+
+    assert any(seed.target_function == "create" and seed.status == "seed"
+               and seed.observed_writes for seed in result.seeds)
+    assert {item.target_function for item in result.hypotheses} == {"create"}
+    assert {item.target_function for item in result.experiments} == {"create"}
