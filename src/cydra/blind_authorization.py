@@ -188,6 +188,14 @@ contract CydraBlindAuthorizationTest {{
         return type({target_type}).creationCode;
     }}
 
+    function _recordVerdict() internal {{
+        address consoleAddress = address(0x000000000000000000636f6e736f6c652e6c6f67);
+        (bool logged,) = consoleAddress.staticcall(
+            abi.encodeWithSignature("log(string,uint256)", "CYDRA_VERDICT", uint256(verdict))
+        );
+        logged;
+    }}
+
     function _revertReason(bytes memory data) internal pure returns (string memory) {{
         if (data.length < 68) return "";
         bytes4 selector;
@@ -214,6 +222,7 @@ contract CydraBlindAuthorizationTest {{
     function testUnauthorizedCallerCapabilityDelta() public {{
         if (!deployed) {{
             assert(verdict == Verdict.Inconclusive);
+            _recordVerdict();
             return;
         }}
 {before_observation}
@@ -227,6 +236,7 @@ contract CydraBlindAuthorizationTest {{
 {post_observation}
 {verdict_logic}
         assert(verdict != Verdict.None, "CYDRA: missing verdict");
+        _recordVerdict();
     }}
 }}
 '''
