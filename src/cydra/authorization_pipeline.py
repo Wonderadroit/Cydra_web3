@@ -126,6 +126,40 @@ def _with_transitive_internal_writes(
     return replace(contract, functions=tuple(enriched)), tuple(derived)
 
 
+def _hypotheses_from_derived_write_seeds(
+    seeds: tuple[HypothesisSeed, ...],
+    existing: tuple[Hypothesis, ...],
+) -> tuple[Hypothesis, ...]:
+    """Promote source-derived write seeds into falsifiable candidates.
+
+    This is a coverage fallback, not a finding: candidates still require execution,
+    causal verification, and reproduction. Generic unresolved-path and lifecycle
+    seeds remain blocked and are deliberately not promoted here.
+    """
+    existing_functions = {item.target_function for item in existing}
+    candidates: list[Hypothesis] = []
+    for seed in seeds:
+        if (
+            seed.status != "seed"
+            or seed.invariant_source != "derived"
+            or not seed.observed_writes
+            or seed.target_function in existing_functions
+        ):
+            continue
+        writes = ", ".join(seed.observed_writes)
+        candidates.append(Hypothesis(
+            hypothesis_id=f"H-AUTH-SEED-{seed.target_contract}-{seed.target_function}-{seed.source_line}",
+            claim=seed.question,
+            invariant_id="INV-AUTH-001",
+            target_function=seed.target_function,
+            attacker_capability="caller outside the evidenced trust boundary",
+            expected_impact=f"security-relevant state may be changed: {writes}",
+            evidence_ids=(f"E-SEED-{seed.seed_id}",),
+        ))
+        existing_functions.add(seed.target_function)
+    return tuple(candidates)
+
+
 def investigate_authorization(
     source: str | Path,
     *,
@@ -154,6 +188,8 @@ def investigate_authorization(
     hypotheses: list[Hypothesis] = []
     for contract in modeled:
         hypotheses.extend(generate_access_control_hypotheses(contract, semantic_evidence))
+    conventional = tuple(hypotheses)
+    hypotheses.extend(_hypotheses_from_derived_write_seeds(seeds, conventional))
     unique = {item.hypothesis_id: item for item in hypotheses}
     ordered = tuple(unique[key] for key in sorted(unique))
     experiments = tuple(plan_access_control_experiment(item) for item in ordered)
