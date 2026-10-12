@@ -43,7 +43,7 @@ jobs:
       - name: Run the one pinned CoW authorization experiment
         run: |
           set -o pipefail
-          forge test --match-contract CoWSetManagerTest --fork-url "$MAINNET_RPC_URL" --fork-block-number 11973115 -vvv 2>&1 | tee cow-set-manager-run.log
+          forge test --match-contract CoWSetManagerTest --fork-url "$MAINNET_RPC_URL" --fork-block-number 15500000 -vvv 2>&1 | tee cow-set-manager-run.log
       - name: Upload experiment evidence
         if: always()
         uses: actions/upload-artifact@v4
