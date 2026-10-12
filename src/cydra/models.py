@@ -87,6 +87,10 @@ class ContractModel:
     # Concrete inherited functions discovered through the source import/inheritance graph.
     # This is model provenance, not a claim that an inherited path is executable.
     inherited_functions: tuple[FunctionModel, ...] = field(default_factory=tuple)
+    # Optional for compatibility with existing positional/manual models; None is unknown.
+    contract_kind: str | None = None
+    has_unimplemented_functions: bool | None = None
+    function_body_metadata_complete: bool | None = None
 
 
 @dataclass(frozen=True)
