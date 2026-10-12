@@ -55,6 +55,9 @@ contract CoWRemoveSolverTest {
         (bool managerOk, bytes memory managerRet) =
             PROXY.call(abi.encodeWithSignature("removeSolver(address)", managerRemovedSolver));
         bool managerSolverAfter = _isSolver(managerRemovedSolver);
+        // Removing one solver must not mutate another solver's independent membership.
+        bool secondSolverAfterManagerRemoval = _isSolver(unrelatedAttemptSolver);
+        bool managerRemovalIsolated = secondSolverAfterManagerRemoval == unrelatedSolverBefore;
 
         address unrelated = address(0xBEEF);
         vm.prank(unrelated);
@@ -67,7 +70,8 @@ contract CoWRemoveSolverTest {
 
         string memory judgment;
         if (!implementationMatches || !initialManagerMatches || !managerOk ||
-            managerSolverBefore != true || managerSolverAfter != false || unrelatedSolverBefore != true) {
+            managerSolverBefore != true || managerSolverAfter != false || unrelatedSolverBefore != true ||
+            !managerRemovalIsolated) {
             judgment = "inconclusive";
         } else if (unrelatedOk) {
             judgment = "supported";
@@ -92,6 +96,8 @@ contract CoWRemoveSolverTest {
             '", "removed_solver": "', vm.toString(managerRemovedSolver),
             '", "solver_allowed_before": ', managerSolverBefore ? "true" : "false",
             ', "solver_allowed_after": ', managerSolverAfter ? "true" : "false",
+            ', "other_solver_allowed_after_removal": ', secondSolverAfterManagerRemoval ? "true" : "false",
+            ', "removal_isolated_to_target_solver": ', managerRemovalIsolated ? "true" : "false",
             ', "return_or_revert_data": "', _hex(managerRet), '" },\n',
             '  "caller_unrelated": { "address": "', vm.toString(unrelated),
             '", "outcome": "', unrelatedOk ? "success" : "reverted",
