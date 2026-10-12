@@ -545,6 +545,8 @@ def main() -> int:
                     "experiment": _json(experiment),
                     "blind_execution": _json(execution),
                     "classification": outcome.benchmark_status,
+                    "verdict": outcome.verdict,
+                    "verdict_reason": outcome.verdict_reason,
                     "finding_gate": "NOT_READY",
                 }
                 if args.output:
@@ -571,7 +573,7 @@ def main() -> int:
             )
             if not args.measurement_only and outcome.benchmark_status != args.expected_status:
                 return 2
-            payload={"target":f"{args.target_repo}@{args.target_ref}:{args.target_path}","hypothesis_seeds":_json(getattr(result, "seeds", ())),"hypothesis":_json(hypothesis),"experiment":_json(experiment),"blind_execution":_json(execution),"classification":outcome.benchmark_status,"finding_gate":"CONFIRMED_ONLY"}
+            payload={"target":f"{args.target_repo}@{args.target_ref}:{args.target_path}","hypothesis_seeds":_json(getattr(result, "seeds", ())),"hypothesis":_json(hypothesis),"experiment":_json(experiment),"blind_execution":_json(execution),"classification":outcome.benchmark_status,"verdict":outcome.verdict,"verdict_reason":outcome.verdict_reason,"finding_gate":"CONFIRMED_ONLY"}
             if args.require_ready and outcome.benchmark_status=="confirmed":
                 isolated_source = execution_project / "src" / source_relative
                 auth_context = "\n".join(
