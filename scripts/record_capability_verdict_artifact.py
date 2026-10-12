@@ -8,7 +8,7 @@ from pathlib import Path
 log_path = Path(sys.argv[1])
 output_path = Path(sys.argv[2])
 output = log_path.read_text(encoding="utf-8", errors="replace")
-raw_observed = re.findall(r"CYDRA_VERDICT[:\\s]+([a-z]+|[0-4])", output)
+raw_observed = re.findall(r"CYDRA_VERDICT[:\s]+([a-z]+|[0-4])", output)
 labels = {"1": "supported", "2": "rejected", "3": "inconclusive", "4": "unmeasurable"}
 observed = [labels.get(value.lower(), value.lower()) for value in raw_observed if value.lower() != "0"]
 expected = {"supported", "unmeasurable", "rejected", "inconclusive"}
