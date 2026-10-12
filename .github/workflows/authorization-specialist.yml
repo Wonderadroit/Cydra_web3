@@ -125,3 +125,60 @@ jobs:
             ${{ runner.temp }}/authorization-campaign.log
           if-no-files-found: warn
           retention-days: 14
+
+  cow-authorization-fork-experiment:
+    if: github.event_name == 'pull_request' && github.head_ref == 'experiment/cow-set-manager-fork'
+    needs: python-regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: experiments/cow-set-manager
+    env:
+      MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+      - name: Select a reachable Ethereum mainnet RPC and pin a recent block
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidates=(" ${MAINNET_RPC_URL:-}" "https://ethereum.publicnode.com" "https://eth.llamarpc.com" "https://rpc.ankr.com/eth" "https://eth.api.onfinality.io/public")
+          for endpoint in "${candidates[@]}"; do
+            [[ -n "$endpoint" ]] || continue
+            chain_id=$(cast chain-id --rpc-url "$endpoint" 2>/dev/null || true)
+            [[ "$chain_id" == "1" ]] || continue
+            latest=$(cast block-number --rpc-url "$endpoint" 2>/dev/null || true)
+            [[ "$latest" =~ ^[0-9]+$ ]] || continue
+            pin=$((latest - 64))
+            (( pin > 0 )) || continue
+            cast block "$pin" --rpc-url "$endpoint" >/dev/null 2>&1 || continue
+            {
+              echo "MAINNET_RPC_URL=$endpoint"
+              echo "FORK_BLOCK_NUMBER=$pin"
+            } >> "$GITHUB_ENV"
+            echo "Selected Ethereum mainnet RPC; pinned block $pin."
+            exit 0
+          done
+          echo "No configured/public Ethereum RPC could serve a pinned block." >&2
+          exit 1
+      - name: Run setManager authorization control
+        run: forge test --match-contract CoWSetManagerTest --fork-url "$MAINNET_RPC_URL" --fork-block-number "$FORK_BLOCK_NUMBER" -vvv 2>&1 | tee cow-set-manager-run.log
+      - name: Run addSolver authorization control
+        run: forge test --match-contract CoWAddSolverTest --fork-url "$MAINNET_RPC_URL" --fork-block-number "$FORK_BLOCK_NUMBER" -vvv 2>&1 | tee cow-add-solver-run.log
+      - name: Run removeSolver authorization and isolation control
+        run: forge test --match-contract CoWRemoveSolverTest --fork-url "$MAINNET_RPC_URL" --fork-block-number "$FORK_BLOCK_NUMBER" -vvv 2>&1 | tee cow-remove-solver-run.log
+      - name: Upload fork experiment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cow-authorization-fork-evidence
+          path: |
+            experiments/cow-set-manager/cow-set-manager-evidence.json
+            experiments/cow-set-manager/cow-add-solver-evidence.json
+            experiments/cow-set-manager/cow-remove-solver-evidence.json
+            experiments/cow-set-manager/cow-set-manager-run.log
+            experiments/cow-set-manager/cow-add-solver-run.log
+            experiments/cow-set-manager/cow-remove-solver-run.log
+          if-no-files-found: warn
+          retention-days: 14
