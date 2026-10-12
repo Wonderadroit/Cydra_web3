@@ -22,6 +22,13 @@ def _run(command: list[str], *, cwd: Path | None = None, log: Path | None = None
     return result.returncode
 
 
+def _in_scope_solidity_files(checkout: Path, source_root: Path) -> list[Path]:
+    return sorted(
+        path for path in source_root.rglob("*.sol")
+        if path.is_file() and path.relative_to(checkout).as_posix() not in EXCLUDED
+    )
+
+
 def _stage_flags(payload: dict) -> dict[str, bool]:
     seeds = payload.get("hypothesis_seeds") or []
     hypotheses = payload.get("hypotheses") or []
@@ -84,10 +91,7 @@ def main() -> int:
         source_root = (checkout / args.target_path).resolve()
         if not source_root.is_dir() or checkout.resolve() not in source_root.parents:
             raise SystemExit(f"target path is not a repository subdirectory: {args.target_path}")
-        files = sorted(
-            path for path in source_root.rglob("*.sol")
-            if path.is_file() and path.relative_to(checkout).as_posix() not in EXCLUDED
-        )
+        files = _in_scope_solidity_files(checkout, source_root)
         if not files:
             raise SystemExit(f"no in-scope Solidity files found under {args.target_path}")
 
