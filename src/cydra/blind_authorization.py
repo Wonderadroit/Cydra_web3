@@ -52,7 +52,7 @@ def _constructor_arguments(contract_model: ContractModel, *, abi_only: bool = Fa
 def _source_for_contract(source_text: str, contract_name: str) -> str:
     """Limit regex-based capability and guard extraction to the named contract body."""
     match = re.search(
-        rf"\\b(?:abstract\\s+)?contract\\s+{re.escape(contract_name)}\\b[^{{]*{{",
+        rf"\b(?:abstract\s+)?contract\s+{re.escape(contract_name)}\b[^{{]*{{",
         source_text,
     )
     if match is None:
