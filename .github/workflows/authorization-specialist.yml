@@ -19,7 +19,7 @@ on:
         required: true
         type: string
       target_path:
-        description: "Target Solidity source path relative to target repository"
+        description: "Target Solidity source directory to enumerate relative to target repository"
         required: true
         type: string
       target_project:
@@ -53,7 +53,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     needs: python-regression
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -108,12 +108,12 @@ jobs:
             --target-ref "$TARGET_REF"
             --target-path "$TARGET_PATH"
             --target-project "$TARGET_PROJECT"
-            --output "$RUNNER_TEMP/authorization-campaign.json"
+            --output-dir "$RUNNER_TEMP/authorization-campaign"
           )
           if [[ "$REQUIRE_READY" == "true" ]]; then
             args+=(--require-ready)
           fi
-          python scripts/run_authorization_campaign.py "${args[@]}" 2>&1 | tee "$RUNNER_TEMP/authorization-campaign.log"
+          python scripts/run_authorization_scope_campaign.py "${args[@]}" 2>&1 | tee "$RUNNER_TEMP/authorization-campaign.log"
       - name: Upload campaign evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -121,7 +121,7 @@ jobs:
           name: cydra-web3-authorization-campaign
           path: |
             ${{ runner.temp }}/target-intake.txt
-            ${{ runner.temp }}/authorization-campaign.json
+            ${{ runner.temp }}/authorization-campaign/
             ${{ runner.temp }}/authorization-campaign.log
           if-no-files-found: warn
           retention-days: 14
