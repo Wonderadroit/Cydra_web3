@@ -7,7 +7,7 @@ from pathlib import Path
 from .ast_dataflow import SemanticRelationshipEvidence
 from .models import ContractModel, Experiment, FunctionModel, Hypothesis, Invariant
 from .hypothesis_seeds import HypothesisSeed, generate_hypothesis_seeds
-from .reasoning import _effective_declared_modifiers, generate_access_control_hypotheses, plan_access_control_experiment
+from .reasoning import _effective_declared_modifiers, _modifier_body_enforces_authorization, generate_access_control_hypotheses, plan_access_control_experiment
 from .solidity_model import _strip_comments, parse_solidity
 
 
@@ -196,7 +196,10 @@ def investigate_authorization(
         (contract.name, function.name)
         for contract in modeled
         for function in contract.functions
-        if _effective_declared_modifiers(contract, function)
+        if any(
+            _modifier_body_enforces_authorization(contract, modifier)
+            for modifier in _effective_declared_modifiers(contract, function)
+        )
     }
     hypotheses.extend(_hypotheses_from_derived_write_seeds(seeds, conventional, protected_targets))
     unique = {item.hypothesis_id: item for item in hypotheses}
