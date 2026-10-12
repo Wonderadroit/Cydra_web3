@@ -78,6 +78,19 @@ def generate_blind_authorization_test_from_experiment(
         raise ValueError(f"Model has no target function: {hypothesis.target_function}")
     if function.visibility not in {"public", "external"}:
         raise ValueError(f"authorization target {function.name} is not externally callable")
+    # Missing deployment facts must never default to a concrete contract.
+    if contract_model.contract_kind is None:
+        raise ValueError("ast_metadata_missing")
+    if contract_model.contract_kind == "interface":
+        raise ValueError("not_deployable:interface")
+    if contract_model.contract_kind == "library":
+        raise ValueError("out_of_scope:library")
+    if contract_model.has_unimplemented_functions is None or contract_model.function_body_metadata_complete is None:
+        raise ValueError("ast_metadata_incomplete")
+    if contract_model.has_unimplemented_functions:
+        raise ValueError("not_deployable:abstract")
+    if contract_model.function_body_metadata_complete is not True:
+        raise ValueError("ast_metadata_incomplete")
 
     call = render_function_call(experiment, function)
     arguments = call.removeprefix(f"target.{function.name}(").removesuffix(");")
