@@ -138,7 +138,7 @@ def generate_blind_authorization_test_from_experiment(
         )
         verdict_logic = f'''        if (!ok) {{
             if (hadRoleBefore != hasRoleAfter) verdict = Verdict.Inconclusive;
-            else if (expectedGuard.length == 0) verdict = Verdict.Unmeasurable;
+            else if (bytes(expectedGuard).length == 0) verdict = Verdict.Unmeasurable;
             else if (keccak256(bytes(_revertReason(returnData))) == keccak256(bytes(expectedGuard))) verdict = Verdict.Rejected;
             else verdict = Verdict.Inconclusive;
         }} else if (!hadRoleBefore && hasRoleAfter) verdict = Verdict.Supported;
@@ -190,7 +190,7 @@ contract CydraBlindAuthorizationTest {{
     }}
 
     function _recordVerdict() internal {{
-        address consoleAddress = address(0x000000000000000000636f6e736f6c652e6c6f67);
+        address consoleAddress = address(uint160(0x000000000000000000636f6e736f6c652e6c6f67));
         (bool logged,) = consoleAddress.staticcall(
             abi.encodeWithSignature("log(string,uint256)", "CYDRA_VERDICT", uint256(verdict))
         );
@@ -235,7 +235,7 @@ contract CydraBlindAuthorizationTest {{
         );
 {post_observation}
 {verdict_logic}
-        assert(verdict != Verdict.None, "CYDRA: missing verdict");
+        assert(verdict != Verdict.None);
         _recordVerdict();
     }}
 }}
