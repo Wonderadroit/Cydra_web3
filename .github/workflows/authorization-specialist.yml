@@ -168,6 +168,8 @@ jobs:
         run: forge test --match-contract CoWAddSolverTest --fork-url "$MAINNET_RPC_URL" --fork-block-number "$FORK_BLOCK_NUMBER" -vvv 2>&1 | tee cow-add-solver-run.log
       - name: Run removeSolver authorization and isolation control
         run: forge test --match-contract CoWRemoveSolverTest --fork-url "$MAINNET_RPC_URL" --fork-block-number "$FORK_BLOCK_NUMBER" -vvv 2>&1 | tee cow-remove-solver-run.log
+      - name: Run initializeManager replay control
+        run: forge test --match-contract CoWInitializeManagerTest --fork-url "$MAINNET_RPC_URL" --fork-block-number "$FORK_BLOCK_NUMBER" -vvv 2>&1 | tee cow-initialize-manager-run.log
       - name: Upload fork experiment evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -177,8 +179,10 @@ jobs:
             experiments/cow-set-manager/cow-set-manager-evidence.json
             experiments/cow-set-manager/cow-add-solver-evidence.json
             experiments/cow-set-manager/cow-remove-solver-evidence.json
+            experiments/cow-set-manager/cow-initialize-manager-evidence.json
             experiments/cow-set-manager/cow-set-manager-run.log
             experiments/cow-set-manager/cow-add-solver-run.log
             experiments/cow-set-manager/cow-remove-solver-run.log
+            experiments/cow-set-manager/cow-initialize-manager-run.log
           if-no-files-found: warn
           retention-days: 14
