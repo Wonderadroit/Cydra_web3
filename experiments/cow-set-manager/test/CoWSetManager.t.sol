@@ -10,6 +10,7 @@ interface Vm {
     function prank(address msgSender) external;
     function load(address target, bytes32 slot) external view returns (bytes32);
     function recordLogs() external;
+    function expectEmit(bool checkTopic1, bool checkTopic2, bool checkTopic3, bool checkData, address emitter) external;
     function getRecordedLogs() external view returns (Log[] memory);
     function writeFile(string calldata path, string calldata data) external;
     function toString(address value) external pure returns (string memory);
@@ -18,6 +19,7 @@ interface Vm {
 }
 
 contract CoWSetManagerTest {
+    event ManagerChanged(address newManager, address oldManager);
     Vm private constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
 
     address private constant PROXY = 0xbbfB9a525ACdd2aB3A5Eb5fc9Ab8CF53b881000e;
@@ -48,6 +50,10 @@ contract CoWSetManagerTest {
         bool implementationMatchesPinnedSource = implementation == EXPECTED_IMPLEMENTATION;
 
         address nextManager = address(0xA11CE);
+        // Foundry's expectation is the authoritative event check; retain recordLogs
+        // as diagnostic evidence because the recorder returned an empty array before.
+        vm.expectEmit(false, false, false, true, PROXY);
+        emit ManagerChanged(nextManager, managerBefore);
         vm.recordLogs();
         vm.prank(managerBefore);
         (bool managerOk, bytes memory managerRet) =
@@ -111,6 +117,8 @@ contract CoWSetManagerTest {
             '  "admin_slot_raw": "', _hex32(adminSlotRaw), '",\n',
             '  "admin_address": "', vm.toString(admin), '",\n',
             '  "manager_admin_overlap": ', overlap ? "true" : "false", ",\n",
+            '  "manager_event_verification": "expectEmit",\n',
+            '  "manager_call_log_count": ', vm.toString(logs.length), ",\n",
             '  "manager_call_logs": ', managerLogsJson, ",\n",
             '  "caller_manager": { "address": "', vm.toString(managerBefore),
             '", "outcome": "', managerOk ? "success" : "reverted",
