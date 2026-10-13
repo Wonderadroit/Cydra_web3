@@ -493,15 +493,8 @@ def main() -> int:
                 )
                 foundry_toml.write_text(current, encoding="utf-8")
 
-        source_root = next(
-            (
-                candidate
-                for candidate in source.parents
-                if candidate.name in {"src", "contracts"}
-            ),
-            project,
-        )
-        source_relative = Path(source).relative_to(source_root)
+        source_root = project
+        source_relative = Path(source).relative_to(project)
         for hypothesis in hypotheses:
             experiment = next(e for e in result.experiments if e.hypothesis_id == hypothesis.hypothesis_id)
             contract = next(
