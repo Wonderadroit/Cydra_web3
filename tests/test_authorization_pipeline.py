@@ -106,6 +106,8 @@ def test_inherited_modifier_counts_only_when_override_calls_super(tmp_path: Path
         "pragma solidity ^0.8.20;\n"
         "contract Derived {\n"
         "  address public treasury;\n"
+        "  address public owner;\n"
+        "  modifier onlyOwner() { require(msg.sender == owner, 'owner'); _; }\n"
         "  function setTreasury(address next) external { super.setTreasury(next); }\n"
         "}\n",
         encoding="utf-8",
