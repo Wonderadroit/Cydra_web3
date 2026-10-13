@@ -29,7 +29,7 @@ jobs:
             --target-repo https://github.com/sherlock-audit/2025-06-symbiotic-relay.git \
             --target-ref 435a21fd81bcd588439feef3108580f535b9e5eb \
             --target-path middleware-sdk/lib/core/src/contracts/vault/Vault.sol \
-            --target-project middleware-sdk \
+            --target-project middleware-sdk/lib/core \
             --measurement-only \
             --allow-no-hypothesis \
             --output "$RUNNER_TEMP/historical-blind-campaign.json" \
