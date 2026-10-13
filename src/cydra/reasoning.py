@@ -24,11 +24,11 @@ _STATE_CHANGING_VISIBILITIES = {"public", "external"}
 
 
 _MODIFIER_SIGNATURE_RE = re.compile(
-    r"\\bmodifier\\s+(?P<name>[A-Za-z_]\\w*)\\s*(?:\\([^)]*\\))?\\s*\\{",
+    r"\bmodifier\s+(?P<name>[A-Za-z_]\w*)\s*(?:\([^)]*\))?\s*\{",
     re.MULTILINE,
 )
 _LIFECYCLE_STATE_RE = re.compile(
-    r"\\b(?:_?initializ(?:ed|ing|ation)|_?paused|_?pauseGuardian|block\\.timestamp|deadline|expiry|expiration)\\b",
+    r"\b(?:_?initializ(?:ed|ing|ation)|_?paused|_?pauseGuardian|block\.timestamp|deadline|expiry|expiration)\b",
     re.IGNORECASE,
 )
 
@@ -56,7 +56,7 @@ def _modifier_body(source: str, name: str) -> str | None:
 
 def _one_level_called_bodies(source: str, body: str) -> tuple[str, ...]:
     """Inspect direct same-file callees only; deliberately no recursive traversal."""
-    called = set(re.findall(r"(?<![.\\w])([A-Za-z_]\\w*)\\s*\\(", body))
+    called = set(re.findall(r"(?<![.\w])([A-Za-z_]\w*)\s*\(", body))
     bodies: list[str] = []
     for name in called:
         function_body = _named_body(source, _FUNCTION_SIGNATURE_RE, name)
