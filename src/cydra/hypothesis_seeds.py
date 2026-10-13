@@ -33,15 +33,16 @@ class HypothesisSeed:
     analysis_budget: str = ANALYSIS_BUDGET
 
 
-def _is_lifecycle_surface(function: FunctionModel) -> bool:
+def _is_lifecycle_surface(contract: ContractModel, function: FunctionModel) -> bool:
     name = function.name.lower()
-    modifiers = {item.lower() for item in function.modifiers}
+    modifiers = function.modifiers
     return (
         name.startswith(("initialize", "initialise", "init", "reinitialize", "reinitialise"))
-        or "initializer" in modifiers
-        or any(item.startswith("reinitializer") for item in modifiers)
+        or any(
+            modifier_restriction_category(contract, function, modifier) == "lifecycle"
+            for modifier in modifiers
+        )
     )
-
 
 def _function_body(function: FunctionModel, contract: ContractModel) -> str | None:
     try:
