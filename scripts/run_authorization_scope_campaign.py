@@ -20,6 +20,46 @@ def _stage_flags(payload: dict) -> dict[str, bool]:
         "execution_attempted": isinstance(payload.get("blind_execution"), dict),
     }
 
+
+
+def _seed_diagnostics(payload: dict) -> dict:
+    """Keep blocked-seed causes visible in the aggregate artifact without reclassifying them."""
+    seeds = payload.get("hypothesis_seeds") or payload.get("seeds") or []
+    status_counts: dict[str, int] = {}
+    blocked_seeds = []
+    reason_counts: dict[str, int] = {}
+    for seed in seeds:
+        if not isinstance(seed, dict):
+            continue
+        status = str(seed.get("status", "unknown"))
+        status_counts[status] = status_counts.get(status, 0) + 1
+        if status != "blocked":
+            continue
+        uncertainty = [str(item) for item in (seed.get("uncertainty") or [])]
+        provenance = [str(item) for item in (seed.get("provenance") or [])]
+        preconditions = [str(item) for item in (seed.get("preconditions_needed") or [])]
+        for reason in uncertainty:
+            reason_counts[reason] = reason_counts.get(reason, 0) + 1
+        blocked_seeds.append({
+            "seed_id": seed.get("seed_id"),
+            "contract": seed.get("target_contract"),
+            "function": seed.get("target_function"),
+            "source": seed.get("source"),
+            "source_line": seed.get("source_line"),
+            "invariant_source": seed.get("invariant_source"),
+            "observed_writes": list(seed.get("observed_writes") or []),
+            "preconditions_needed": preconditions,
+            "uncertainty": uncertainty,
+            "provenance": provenance,
+            "analysis_budget": seed.get("analysis_budget"),
+        })
+    return {
+        "seed_status_counts": status_counts,
+        "blocked_seed_count": len(blocked_seeds),
+        "blocked_seed_reason_counts": reason_counts,
+        "blocked_seeds": blocked_seeds,
+    }
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target-repo", required=True)
@@ -70,14 +110,27 @@ def main() -> int:
             except (OSError, json.JSONDecodeError):
                 payload = {}
             stages = _stage_flags(payload)
+            seed_diagnostics = _seed_diagnostics(payload)
             records.append({"file": rel, "result": str(result_file.relative_to(out)),
                             "log": str(log_file.relative_to(out)), "exit_code": run.returncode,
-                            **stages, "classification": payload.get("classification", payload.get("disposition", "NO_RESULT")),
+                            **stages, **seed_diagnostics,
+                            "classification": payload.get("classification", payload.get("disposition", "NO_RESULT")),
                             "finding_gate": payload.get("finding_gate", "NOT_READY")})
             print(f"[{i}/{len(files)}] {rel}: {stages}")
 
+    aggregate_seed_status_counts: dict[str, int] = {}
+    aggregate_blocked_reason_counts: dict[str, int] = {}
+    for record in records:
+        for status, count in record.get("seed_status_counts", {}).items():
+            aggregate_seed_status_counts[status] = aggregate_seed_status_counts.get(status, 0) + count
+        for reason, count in record.get("blocked_seed_reason_counts", {}).items():
+            aggregate_blocked_reason_counts[reason] = aggregate_blocked_reason_counts.get(reason, 0) + count
+
     summary = {
         "target_repo": args.target_repo, "target_revision": revision, "target_source_path": args.target_path,
+        "seed_status_counts": aggregate_seed_status_counts,
+        "blocked_seed_count": sum(r.get("blocked_seed_count", 0) for r in records),
+        "blocked_seed_reason_counts": aggregate_blocked_reason_counts,
         "excluded_paths": sorted(EXCLUDED), "solidity_files_enumerated": len(records),
         "files_with_zero_seeds": sum(not r["seeds"] for r in records),
         "files_with_seeds": sum(r["seeds"] for r in records),
