@@ -30,6 +30,11 @@ def _seed_coverage_allows_measurement(hypotheses, seeds) -> bool:
 
 
 
+def _staged_source_import(execution_project: Path, source_relative: Path, test_parent: Path) -> str:
+    """Build an import relative to the staged project, not the original checkout root."""
+    return os.path.relpath(execution_project / source_relative, test_parent).replace(os.sep, "/")
+
+
 def _prepare_isolated_foundry_project(target_root: Path, source: Path, destination: Path) -> Path:
     """Stage the import closure without relocating files relative to the selected project root."""
     src_root = destination
@@ -553,10 +558,7 @@ def main() -> int:
                 generated = generate_blind_authorization_test_from_experiment(
                     hypothesis,
                     experiment,
-                    os.path.relpath(
-                        execution_project / Path(contract.source),
-                        output.parent,
-                    ).replace(os.sep, "/"),
+                    _staged_source_import(execution_project, source_relative, output.parent),
                     contract.name,
                     output,
                     contract,
