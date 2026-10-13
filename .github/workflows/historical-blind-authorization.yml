@@ -1,0 +1,57 @@
+name: Historical Blind Authorization Validation
+
+on:
+  push:
+    branches:
+      - "validation/historical-blind-access-control"
+
+permissions:
+  contents: read
+
+jobs:
+  blind-historical-case:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: foundry-rs/foundry-toolchain@v1
+      - run: python -m pip install --upgrade pip pytest
+      - run: python -m pip install -e .
+      - name: Run blind campaign against pinned historical source
+        env:
+          PYTHONPATH: src
+        run: |
+          set -o pipefail
+          python scripts/run_authorization_campaign.py \
+            --target-repo https://github.com/sherlock-audit/2025-06-symbiotic-relay.git \
+            --target-ref 435a21fd81bcd588439feef3108580f535b9e5eb \
+            --target-path middleware-sdk/lib/core/src/contracts/vault/Vault.sol \
+            --target-project middleware-sdk \
+            --measurement-only \
+            --allow-no-hypothesis \
+            --output "$RUNNER_TEMP/historical-blind-campaign.json" \
+            2>&1 | tee "$RUNNER_TEMP/historical-blind-campaign.log"
+      - name: Record benchmark provenance after the blind run
+        if: always()
+        run: |
+          {
+            echo "Target repository commit: 435a21fd81bcd588439feef3108580f535b9e5eb"
+            echo "Nested source dependency commit: 9d18fda6202924a7857dc5bdb834da9f7dc90a39"
+            echo "Disclosure: https://github.com/sherlock-audit/2025-06-symbiotic-relay-judging/issues/85"
+            echo "Blindness boundary: no expected function name or expected vulnerability class is passed to the campaign command."
+            echo "This file is written after the campaign and is not an engine input."
+          } > "$RUNNER_TEMP/historical-benchmark-provenance.txt"
+      - name: Upload blind evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cydra-historical-blind-authorization
+          path: |
+            ${{ runner.temp }}/historical-blind-campaign.json
+            ${{ runner.temp }}/historical-blind-campaign.log
+            ${{ runner.temp }}/historical-benchmark-provenance.txt
+          if-no-files-found: warn
+          retention-days: 14
