@@ -215,7 +215,7 @@ def _compiler_version_attempted(project: Path, source: Path, stderr: str = "") -
         config = (project / "foundry.toml").read_text(encoding="utf-8")
     except (OSError, UnicodeError):
         config = ""
-    match = re.search(r"^\s*solc\s*=\s*["']([^"']+)["']", config, re.MULTILINE)
+    match = re.search(r"""^\s*solc\s*=\s*["']([^"']+)["']""", config, re.MULTILINE)
     if match:
         return match.group(1)
     try:
