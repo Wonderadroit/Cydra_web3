@@ -23,6 +23,89 @@ _ADMIN_NAME_PREFIXES = (
 _STATE_CHANGING_VISIBILITIES = {"public", "external"}
 
 
+_MODIFIER_SIGNATURE_RE = re.compile(
+    r"\bmodifier\s+(?P<name>[A-Za-z_]\w*)\s*(?:\([^)]*\))?\s*\{",
+    re.MULTILINE,
+)
+_LIFECYCLE_STATE_RE = re.compile(
+    r"\b(?:_?initializ(?:ed|ing|ation)|_?paused|_?pauseGuardian|block\.timestamp|deadline|expiry|expiration)\b",
+    re.IGNORECASE,
+)
+
+
+def _named_body(source: str, pattern: re.Pattern[str], name: str) -> str | None:
+    """Return a named modifier/function body using balanced braces."""
+    for match in pattern.finditer(source):
+        if match.group("name") != name:
+            continue
+        opening = match.end() - 1
+        depth = 0
+        for index in range(opening, len(source)):
+            if source[index] == "{":
+                depth += 1
+            elif source[index] == "}":
+                depth -= 1
+                if depth == 0:
+                    return source[opening + 1:index]
+    return None
+
+
+def _modifier_body(source: str, name: str) -> str | None:
+    return _named_body(source, _MODIFIER_SIGNATURE_RE, name)
+
+
+def _one_level_called_bodies(source: str, body: str) -> tuple[str, ...]:
+    """Inspect direct same-file callees only; deliberately no recursive traversal."""
+    called = set(re.findall(r"(?<![.\w])([A-Za-z_]\w*)\s*\(", body))
+    bodies: list[str] = []
+    for name in called:
+        function_body = _named_body(source, _FUNCTION_SIGNATURE_RE, name)
+        if function_body is not None:
+            bodies.append(function_body)
+    return tuple(bodies)
+
+
+def modifier_restriction_category(
+    contract: ContractModel, function: FunctionModel, modifier: str
+) -> str:
+    """Classify a modifier by the restriction visible in its body, with one-level calls.
+
+    Categories are authorization, lifecycle, and other. Unknown/unavailable bodies
+    are not silently promoted to authorization guards.
+    """
+    try:
+        source = Path(contract.source).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return "other"
+    body = _modifier_body(_strip_signature_comments(source), modifier)
+    if body is None:
+        return "other"
+    related_bodies = (body,) + _one_level_called_bodies(source, body)
+    if any(_CALLER_TOKEN_RE.search(candidate) for candidate in related_bodies):
+        return "authorization"
+    if any(_LIFECYCLE_STATE_RE.search(candidate) for candidate in related_bodies):
+        return "lifecycle"
+    return "other"
+
+
+def _authorization_modifiers(
+    contract: ContractModel, function: FunctionModel
+) -> tuple[str, ...]:
+    return tuple(
+        modifier for modifier in _effective_declared_modifiers(contract, function)
+        if modifier_restriction_category(contract, function, modifier) == "authorization"
+    )
+
+
+def _lifecycle_modifiers(
+    contract: ContractModel, function: FunctionModel
+) -> tuple[str, ...]:
+    return tuple(
+        modifier for modifier in _effective_declared_modifiers(contract, function)
+        if modifier_restriction_category(contract, function, modifier) == "lifecycle"
+    )
+
+
 def _strip_signature_comments(text: str) -> str:
     text = re.sub(r"//[^\n]*", " ", text)
     return re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
@@ -173,18 +256,18 @@ def generate_access_control_hypotheses(
     candidate_functions = {f.name: f for f in admin_functions}
     candidate_functions.update({f.name: f for f in seeded_functions})
     declared = tuple((f, _effective_declared_modifiers(contract, f)) for f in candidate_functions.values())
-    protected_functions = [f for f in _externally_callable_functions(contract) if _effective_declared_modifiers(contract, f)]
+    protected_functions = [f for f in _externally_callable_functions(contract) if _authorization_modifiers(contract, f)]
     if not protected_functions and not declared:
         return ()
     if protected_functions:
-        observed = sorted({m for f in protected_functions for m in _effective_declared_modifiers(contract, f)})
+        observed = sorted({m for f in protected_functions for m in _authorization_modifiers(contract, f)})
         invariant = access_control_invariant(contract, observed[0] if len(observed) == 1 else "observed privileged modifier")
     else:
         invariant = access_control_invariant(contract)
     return tuple(
         Hypothesis(f"H-AUTH-{f.name}", f"{f.name} may permit an unauthorized caller to mutate privileged state.", invariant.invariant_id, f.name, "arbitrary external caller", "privileged configuration or authorization state can be changed", evidence_ids=(f"E-MODEL-{f.name}",))
         for f, modifiers in declared
-        if not modifiers and not _is_caller_scoped_write(contract, f) and not _has_caller_authorization_predicate(f)
+        if not _authorization_modifiers(contract, f) and not _lifecycle_modifiers(contract, f) and not _is_caller_scoped_write(contract, f) and not _has_caller_authorization_predicate(f)
     )
 
 

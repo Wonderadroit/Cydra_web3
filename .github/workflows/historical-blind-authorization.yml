@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - "validation/historical-blind-access-control"
+      - "fix/structural-modifier-classification"
 
 permissions:
   contents: read

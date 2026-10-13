@@ -6,6 +6,7 @@ import re
 from typing import Literal
 
 from .models import ContractModel, FunctionModel
+from .reasoning import modifier_restriction_category
 
 SeedStatus = Literal["seed", "testable", "blocked"]
 InvariantSource = Literal["derived", "generic"]
@@ -32,15 +33,16 @@ class HypothesisSeed:
     analysis_budget: str = ANALYSIS_BUDGET
 
 
-def _is_lifecycle_surface(function: FunctionModel) -> bool:
+def _is_lifecycle_surface(contract: ContractModel, function: FunctionModel) -> bool:
     name = function.name.lower()
-    modifiers = {item.lower() for item in function.modifiers}
+    modifiers = function.modifiers
     return (
         name.startswith(("initialize", "initialise", "init", "reinitialize", "reinitialise"))
-        or "initializer" in modifiers
-        or any(item.startswith("reinitializer") for item in modifiers)
+        or any(
+            modifier_restriction_category(contract, function, modifier) == "lifecycle"
+            for modifier in modifiers
+        )
     )
-
 
 def _function_body(function: FunctionModel, contract: ContractModel) -> str | None:
     try:
@@ -161,7 +163,7 @@ def generate_hypothesis_seeds(contracts: tuple[ContractModel, ...] | list[Contra
             if function.visibility not in {"public", "external"}:
                 continue
             observed_writes = _observed_writes(contract, function)
-            lifecycle = _is_lifecycle_surface(function)
+            lifecycle = _is_lifecycle_surface(contract, function)
             unresolved = _unresolved_execution_path(contract, function)
             if not observed_writes and not lifecycle and not unresolved:
                 continue

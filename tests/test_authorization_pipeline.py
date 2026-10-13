@@ -106,13 +106,15 @@ def test_inherited_modifier_counts_only_when_override_calls_super(tmp_path: Path
         "pragma solidity ^0.8.20;\n"
         "contract Derived {\n"
         "  address public treasury;\n"
+        "  address public owner;\n"
+        "  modifier onlyOwner() { require(msg.sender == owner, 'owner'); _; }\n"
         "  function setTreasury(address next) external { super.setTreasury(next); }\n"
         "}\n",
         encoding="utf-8",
     )
     function = FunctionModel(
         name="setTreasury", visibility="external", modifiers=(), writes=("treasury",),
-        external_calls=(), line=4,
+        external_calls=(), line=6,
     )
     inherited = FunctionModel(
         name="setTreasury", visibility="public", modifiers=("onlyOwner",), writes=("treasury",),
@@ -207,3 +209,47 @@ def test_seeded_state_writer_promotes_without_authority_getter(tmp_path: Path):
     assert {item.target_function for item in result.hypotheses} == {"create"}
     assert len(result.experiments) == 1
     assert result.experiments[0].hypothesis_id == result.hypotheses[0].hypothesis_id
+
+
+def test_modifier_restrictions_are_classified_structurally(tmp_path: Path):
+    from cydra.reasoning import modifier_restriction_category
+
+    source = tmp_path / "ModifierCategories.sol"
+    source.write_text(
+        "pragma solidity ^0.8.20;\n"
+        "contract ModifierCategories {\n"
+        "  address public owner;\n"
+        "  address public slasher;\n"
+        "  bool private _entered;\n"
+        "  bool private _initializing;\n"
+        "  modifier nonReentrant() { require(!_entered, 'reentrant'); _entered = true; _; _entered = false; }\n"
+        "  modifier onlyOwner() { require(msg.sender == owner, 'owner'); _; }\n"
+        "  modifier onlyInitializing() { _checkInitializing(); _; }\n"
+        "  function _checkInitializing() internal view { require(_initializing, 'not initializing'); }\n"
+        "  function foo() external nonReentrant { slasher = msg.sender; }\n"
+        "  function bar() external onlyOwner { slasher = msg.sender; }\n"
+        "  function baz() external onlyOwner nonReentrant { slasher = msg.sender; }\n"
+        "  function qux() external onlyInitializing { slasher = msg.sender; }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    result = investigate_authorization(source, target="modifier-classification-fixture")
+    contract = next(item for item in result.contracts if item.name == "ModifierCategories")
+    functions = {item.name: item for item in contract.functions}
+
+    assert modifier_restriction_category(contract, functions["foo"], "nonReentrant") == "other"
+    assert modifier_restriction_category(contract, functions["bar"], "onlyOwner") == "authorization"
+    assert modifier_restriction_category(contract, functions["baz"], "onlyOwner") == "authorization"
+    assert modifier_restriction_category(contract, functions["qux"], "onlyInitializing") == "lifecycle"
+
+    # Reentrancy protection is not mistaken for caller authorization.
+    assert "foo" in {item.target_function for item in result.hypotheses}
+    # A caller-identity guard suppresses the hypothesis even alongside nonReentrant.
+    assert "bar" not in {item.target_function for item in result.hypotheses}
+    assert "baz" not in {item.target_function for item in result.hypotheses}
+    # Lifecycle-only surfaces remain honest blocked seeds, not authorization hypotheses.
+    qux_seed = next(item for item in result.seeds if item.target_function == "qux")
+    assert qux_seed.status == "blocked"
+    assert "initialization_state" in qux_seed.preconditions_needed
+    assert "qux" not in {item.target_function for item in result.hypotheses}
