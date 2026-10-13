@@ -17,7 +17,10 @@ def test_nested_project_preserves_original_relative_import_layout(tmp_path: Path
     )
     interface.write_text("pragma solidity ^0.8.20; interface IMigratableEntity {}\n", encoding="utf-8")
     (project / "foundry.toml").write_text(
-        '[profile.default]\nremappings = ["core/=lib/core/src/"]\n',
+        '[profile.default]\n'
+        'remappings = ["@core/=lib/core/"]\n'
+        'fs_permissions = [{ access = "read-write", path = "./"}]\n'
+        'rpc_endpoints = { mainnet = "${RPC}" }\n',
         encoding="utf-8",
     )
 
@@ -26,7 +29,8 @@ def test_nested_project_preserves_original_relative_import_layout(tmp_path: Path
 
     assert (isolated / "lib/core/src/contracts/vault/Vault.sol").is_file()
     assert (isolated / "lib/core/src/interfaces/common/IMigratableEntity.sol").is_file()
-    assert "core/=lib/core/src/" in (isolated / "remappings.txt").read_text(encoding="utf-8")
+    extracted = (isolated / "remappings.txt").read_text(encoding="utf-8").splitlines()
+    assert extracted == ["@core/=lib/core/"]
 
 
 def test_missing_import_fails_closed_with_staging_diagnostic(tmp_path: Path) -> None:
