@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 from typing import Literal
 
-from .models import ContractModel, FunctionModel
+from .models import ContractModel, FunctionModel\nfrom .reasoning import modifier_restriction_category
 
 SeedStatus = Literal["seed", "testable", "blocked"]
 InvariantSource = Literal["derived", "generic"]
@@ -161,7 +161,7 @@ def generate_hypothesis_seeds(contracts: tuple[ContractModel, ...] | list[Contra
             if function.visibility not in {"public", "external"}:
                 continue
             observed_writes = _observed_writes(contract, function)
-            lifecycle = _is_lifecycle_surface(function)
+            lifecycle = _is_lifecycle_surface(contract, function)
             unresolved = _unresolved_execution_path(contract, function)
             if not observed_writes and not lifecycle and not unresolved:
                 continue
