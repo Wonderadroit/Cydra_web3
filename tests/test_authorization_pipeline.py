@@ -114,7 +114,7 @@ def test_inherited_modifier_counts_only_when_override_calls_super(tmp_path: Path
     )
     function = FunctionModel(
         name="setTreasury", visibility="external", modifiers=(), writes=("treasury",),
-        external_calls=(), line=4,
+        external_calls=(), line=6,
     )
     inherited = FunctionModel(
         name="setTreasury", visibility="public", modifiers=("onlyOwner",), writes=("treasury",),
