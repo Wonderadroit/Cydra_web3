@@ -52,8 +52,11 @@ def _prepare_isolated_foundry_project(target_root: Path, source: Path, destinati
             relative = current.relative_to(source_root)
             destination_file = src_root / relative
         except ValueError:
+            # Preserve repository-root paths for vendored dependencies (for
+            # example lib/solady/...), otherwise Solidity imports such as
+            # "lib/solady/src/..." will still point at a missing execution path.
             relative = current.relative_to(target_root)
-            destination_file = destination / "src" / relative
+            destination_file = destination / relative
         if current in copied:
             continue
         copied.add(current)
@@ -73,7 +76,8 @@ def _prepare_isolated_foundry_project(target_root: Path, source: Path, destinati
         for imported in _IMPORT_RE.findall(text):
             if imported.startswith("."):
                 dependency = (current.parent / imported).resolve()
-            elif imported.startswith("contracts/"):
+            elif imported.startswith(("contracts/", "lib/", "node_modules/")):
+                # These are repository-root imports, not source-root imports.
                 dependency = (target_root / imported).resolve()
             else:
                 dependency = None
@@ -89,10 +93,14 @@ def _prepare_isolated_foundry_project(target_root: Path, source: Path, destinati
 
     remapping_lines = []
     for prefix, destination_path in remappings:
-        # Remapped dependencies under node_modules live at the Foundry root;
-        # source-tree dependencies copied by the closure live under src/.
-        remapped_root = "node_modules" if destination_path.startswith("node_modules/") else "src"
-        remapping_lines.append(f"{prefix}={remapped_root}/{destination_path}")
+        # The isolated project preserves repository-root dependency paths.
+        # Only dependencies that are not already rooted at lib/ or node_modules/
+        # are staged under src/.
+        if destination_path.startswith(("node_modules/", "lib/")):
+            remapped_destination = destination_path
+        else:
+            remapped_destination = f"src/{destination_path}"
+        remapping_lines.append(f"{prefix}={remapped_destination}")
     remapping_literal = ", ".join(repr(item) for item in remapping_lines)
     (destination / "foundry.toml").write_text(
         '[profile.default]\n'
