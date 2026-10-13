@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import re
 import shutil
+import tomllib
 
 from cydra.authorization_runtime import classify_authorization_blind_execution
 from cydra.blind_authorization import generate_blind_authorization_test_from_experiment
@@ -39,20 +40,34 @@ def _prepare_isolated_foundry_project(target_root: Path, source: Path, destinati
     copied: set[Path] = set()
     unresolved: list[dict[str, str]] = []
     remappings: list[tuple[str, str]] = []
-    for remappings_file in (target_root / "remappings.txt", target_root / "foundry.toml"):
-        if not remappings_file.exists():
-            continue
+    remappings_file = target_root / "remappings.txt"
+    if remappings_file.exists():
         for raw_line in remappings_file.read_text(encoding="utf-8").splitlines():
             line = raw_line.strip()
-            if not line or line.startswith("#") or line.startswith("["):
+            if not line or line.startswith("#") or "=" not in line:
                 continue
-            candidates = [line] if "=" in line and not line.startswith('"') and not line.startswith("'") else []
-            if remappings_file.name == "foundry.toml":
-                candidates.extend(re.findall(r"""['"]([^'"]+=[^'"]+)['"]""", line))
-            for candidate in candidates:
-                prefix, destination_path = candidate.split("=", 1)
-                if prefix and destination_path:
-                    remappings.append((prefix, destination_path))
+            prefix, destination_path = line.split("=", 1)
+            if prefix and destination_path:
+                remappings.append((prefix, destination_path))
+
+    foundry_config = target_root / "foundry.toml"
+    if foundry_config.exists():
+        try:
+            config = tomllib.loads(foundry_config.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, tomllib.TOMLDecodeError) as exc:
+            raise RuntimeError(f"staging_unsupported: invalid foundry.toml: {exc}") from exc
+        profile_default = config.get("profile", {}).get("default", {})
+        configured_remappings = profile_default.get("remappings", config.get("remappings", []))
+        if not isinstance(configured_remappings, list) or not all(
+            isinstance(item, str) for item in configured_remappings
+        ):
+            raise RuntimeError("staging_unsupported: foundry remappings must be an array of strings")
+        for candidate in configured_remappings:
+            if "=" not in candidate:
+                raise RuntimeError(f"staging_unsupported: invalid foundry remapping: {candidate!r}")
+            prefix, destination_path = candidate.split("=", 1)
+            if prefix and destination_path:
+                remappings.append((prefix, destination_path))
     remappings = list(dict.fromkeys(remappings))
 
     while pending:
