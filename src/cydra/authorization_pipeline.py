@@ -153,7 +153,20 @@ def investigate_authorization(
 
     hypotheses: list[Hypothesis] = []
     for contract in modeled:
-        hypotheses.extend(generate_access_control_hypotheses(contract, semantic_evidence))
+        # Promote only independently generated, testable state-write seeds. Blocked
+        # lifecycle/unresolved-path seeds remain blocked; authority getter support is
+        # intentionally not a conversion precondition.
+        seeded_state_changers = tuple(
+            seed.target_function for seed in seeds
+            if seed.target_contract == contract.name
+            and seed.status == "seed"
+            and bool(seed.observed_writes)
+        )
+        hypotheses.extend(
+            generate_access_control_hypotheses(
+                contract, semantic_evidence, seeded_state_changers=seeded_state_changers
+            )
+        )
     unique = {item.hypothesis_id: item for item in hypotheses}
     ordered = tuple(unique[key] for key in sorted(unique))
     experiments = tuple(plan_access_control_experiment(item) for item in ordered)

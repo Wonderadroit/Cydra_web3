@@ -5,7 +5,6 @@ import re
 
 from .models import ContractModel, Experiment, Hypothesis
 from .planned_call import render_function_call
-from .authorization_runtime import security_assertion_marker
 
 
 def _constructor_argument(parameter, *, abi_only: bool = False) -> str:
@@ -32,8 +31,6 @@ def _constructor_argument(parameter, *, abi_only: bool = False) -> str:
         return 'bytes("")'
     if base.startswith("bytes") and base[5:].isdigit():
         return "bytes32(uint256(1))" if base == "bytes32" else f"{base}(0)"
-    # ABI encoding accepts an address for interface/contract constructor
-    # parameters, avoiding extra source imports in historical harnesses.
     return "address(0x1001)"
 
 
@@ -52,6 +49,27 @@ def _constructor_arguments(contract_model: ContractModel, *, abi_only: bool = Fa
     return ", ".join(arguments)
 
 
+def _source_for_contract(source_text: str, contract_name: str) -> str:
+    """Limit regex-based capability and guard extraction to the named contract body."""
+    match = re.search(
+        rf"\b(?:abstract\s+)?contract\s+{re.escape(contract_name)}\b[^{{]*{{",
+        source_text,
+    )
+    if match is None:
+        return source_text
+    start = match.start()
+    depth = 0
+    for index in range(match.end() - 1, len(source_text)):
+        char = source_text[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return source_text[start:index + 1]
+    return source_text[start:]
+
+
 def generate_blind_authorization_test_from_experiment(
     hypothesis: Hypothesis,
     experiment: Experiment,
@@ -61,7 +79,7 @@ def generate_blind_authorization_test_from_experiment(
     contract_model: ContractModel,
     creation_bytecode: str | None = None,
 ) -> Path:
-    """Render a one-sided authorization invariant test from the canonical plan."""
+    """Render an authorization test with explicit capability-measurement verdicts."""
     if hypothesis.invariant_id != "INV-AUTH-001":
         raise ValueError(
             f"Unsupported invariant for blind authorization generation: {hypothesis.invariant_id}"
@@ -84,31 +102,34 @@ def generate_blind_authorization_test_from_experiment(
     constructor_arguments = _constructor_arguments(
         contract_model, abi_only=creation_bytecode is not None
     )
-    constructor_encoding = (
-        f"abi.encode({constructor_arguments})"
-        if constructor_arguments
-        else 'bytes("")'
+    constructor_suffix = (
+        f"abi.encode({constructor_arguments})" if constructor_arguments else 'bytes("")'
     )
-    # Prefer typed deployment for blind authorization harnesses. A raw
-    # creation-bytecode path can cause Foundry to synthesize constructor-argument
-    # helper structs whose ABI shape is lost for multi-parameter constructors.
-    # The target import is already part of the authorized harness boundary, so
-    # direct deployment preserves the constructor ABI exactly.
-    init_expression = ""
-    target_declaration = f"{target_type} internal target;"
-    import_line = f'import {{ {target_type} }} from "{target_import}";'
-    target_cast = target_type
 
-    pragma = contract_model.pragma or "^0.8.20"
-    path = Path(output_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    state_getter = None
-    state_type = None
     try:
         source_text = Path(contract_model.source).read_text(encoding="utf-8")
     except (OSError, UnicodeError):
         source_text = ""
+
+    source_text = _source_for_contract(source_text, target_type)
+
+    # The first supported authority surface is OpenZeppelin-style AccessControl.
+    # It is only measurable when both the role getter and hasRole read are present.
+    role_getter = None
+    if re.search(r"\bfunction\s+hasRole\s*\(", source_text):
+        role_match = re.search(
+            r"\bbytes32\s+public\s+constant\s+(DEFAULT_ADMIN_ROLE)\s*=", source_text
+        )
+        if role_match:
+            role_getter = role_match.group(1)
+
+    ownable_supported = bool(
+        re.search(r"\bfunction\s+owner\s*\(\s*\)", source_text)
+        and re.search(r"\bowner\s*\(\s*\)\s*(?:external|public)", source_text)
+    )
+
+    state_getter = None
+    state_type = None
     for written in function.writes:
         match = re.search(
             rf"\b(address(?:\s+payable)?|bool|uint\d*|int\d*)\s+public\s+{re.escape(written)}\s*;",
@@ -119,35 +140,58 @@ def generate_blind_authorization_test_from_experiment(
             state_getter = written
             break
 
-    state_view = ""
-    if state_getter is not None:
-        state_snapshot = f"        {state_type} beforeState = target.{state_getter}();"
-        post_state = f"target.{state_getter}()"
-        call_assertion = f'''        require(ok, "{security_assertion_marker()}: authorization call reverted before invariant observation");
-        require(
-            {post_state} == beforeState,
-            "{security_assertion_marker()}: unauthorized caller mutated modeled administrative state"
-        );'''
-    else:
-        state_snapshot = ""
-        call_assertion = f'''        require(
-            !ok,
-            "{security_assertion_marker()}: unauthorized caller successfully invoked protected administrative operation"
-        );'''
-
-    # Avoid Solidity's `new Target(...)` syntax here. Foundry's preprocessor
-    # rewrites nested `new` expressions into generated free-function helpers;
-    # those helpers are not parseable by historical Solidity 0.6.x targets.
-    # Assemble the target creation bytecode explicitly so constructor execution
-    # remains real while the harness stays compiler-version neutral.
-    constructor_suffix = (
-        f"abi.encode({constructor_arguments})" if constructor_arguments else 'bytes("")'
+    # Only a single source-grounded revert string is accepted as a guard oracle.
+    guard_strings = set(re.findall(
+        r"(?:require|revert)\s*\([^;]*?[\"']([^\"']{3,})[\"']",
+        source_text,
+        re.DOTALL,
+    ))
+    expected_guard = next(iter(guard_strings)) if len(guard_strings) == 1 else None
+    guard_literal = (
+        '"' + expected_guard.replace("\\", "\\\\").replace('"', '\\"') + '"'
+        if expected_guard else '""'
     )
+
+    if role_getter:
+        before_observation = (
+            f"        bool hadRoleBefore = target.hasRole(target.{role_getter}(), address(attacker));"
+        )
+        post_observation = (
+            f"        bool hasRoleAfter = target.hasRole(target.{role_getter}(), address(attacker));"
+        )
+        verdict_logic = f'''        if (!ok) {{
+            if (hadRoleBefore != hasRoleAfter) verdict = Verdict.Inconclusive;
+            else if (bytes(expectedGuard).length == 0) verdict = Verdict.Unmeasurable;
+            else if (keccak256(bytes(_revertReason(returnData))) == keccak256(bytes(expectedGuard))) verdict = Verdict.Rejected;
+            else verdict = Verdict.Inconclusive;
+        }} else if (!hadRoleBefore && hasRoleAfter) verdict = Verdict.Supported;
+        else if (hadRoleBefore == hasRoleAfter) verdict = Verdict.Rejected;
+        else verdict = Verdict.Inconclusive;'''
+    elif ownable_supported:
+        before_observation = "        address ownerBefore = target.owner();"
+        post_observation = "        address ownerAfter = target.owner();"
+        verdict_logic = f'''        if (!ok) {{
+            if (ownerBefore != ownerAfter) verdict = Verdict.Inconclusive;
+            else if (expectedGuard.length == 0) verdict = Verdict.Unmeasurable;
+            else if (keccak256(bytes(_revertReason(returnData))) == keccak256(bytes(expectedGuard))) verdict = Verdict.Rejected;
+            else verdict = Verdict.Inconclusive;
+        }} else if (ownerBefore != address(attacker) && ownerAfter == address(attacker)) verdict = Verdict.Supported;
+        else if (ownerBefore == ownerAfter) verdict = Verdict.Rejected;
+        else verdict = Verdict.Inconclusive;'''
+    else:
+        # A public state getter is not itself proof of an authority relationship.
+        before_observation = ""
+        post_observation = ""
+        verdict_logic = '        verdict = Verdict.Unmeasurable; verdictReason = "no_authority_getter";'
+
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pragma = contract_model.pragma or "^0.8.20"
+    encoded_arguments = f", {arguments}" if arguments else ""
     source = f'''// SPDX-License-Identifier: UNLICENSED
 pragma solidity {pragma};
 // Hypothesis: {hypothesis.hypothesis_id}
 // Experiment: {experiment.experiment_id}
-// One-sided invariant test: no patched target or benchmark answer is imported.
 import {{ {target_type} }} from "{target_import}";
 
 contract CydraUnauthorizedCaller {{
@@ -157,37 +201,71 @@ contract CydraUnauthorizedCaller {{
 }}
 
 contract CydraBlindAuthorizationTest {{
-    {target_declaration}
+    enum Verdict {{ None, Supported, Rejected, Inconclusive, Unmeasurable }}
+    {target_type} internal target;
     CydraUnauthorizedCaller internal attacker;
+    Verdict public verdict;
+    bool public deployed;
+    string internal expectedGuard = {guard_literal};
+    string public verdictReason;
 
     function _targetCreationCode() internal pure returns (bytes memory) {{
         return type({target_type}).creationCode;
     }}
 
-    function setUp() public {{
-        bytes memory initCode = abi.encodePacked(
-            _targetCreationCode(),
-            {constructor_suffix}
+    function _recordVerdict() internal {{
+        address consoleAddress = address(uint160(0x00000000000000000000636f6e736f6c652e6c6f67));
+        (bool logged,) = consoleAddress.staticcall(
+            abi.encodeWithSignature("log(string,uint256)", "CYDRA_VERDICT", uint256(verdict))
         );
-        address deployed;
-        assembly {{
-            deployed := create(0, add(initCode, 0x20), mload(initCode))
-        }}
-        require(deployed != address(0), "CYDRA: constructor deployment failed");
-        target = {target_type}(payable(deployed));
-        attacker = new CydraUnauthorizedCaller();
+        logged;
+        (bool reasonLogged,) = consoleAddress.staticcall(
+            abi.encodeWithSignature("log(string,string)", "CYDRA_VERDICT_REASON", verdictReason)
+        );
+        reasonLogged;
     }}
 
-    function testUnauthorizedCallerCannotMutateModeledAdministrativeState() public {{
-{state_snapshot}
-        (bool ok,) = attacker.execute(
+    function _revertReason(bytes memory data) internal pure returns (string memory) {{
+        if (data.length < 68) return "";
+        bytes4 selector;
+        assembly {{ selector := mload(add(data, 0x20)) }}
+        if (selector != 0x08c379a0) return "";
+        assembly {{ data := add(data, 0x04) }}
+        return abi.decode(data, (string));
+    }}
+
+    function setUp() public {{
+        bytes memory initCode = abi.encodePacked(_targetCreationCode(), {constructor_suffix});
+        address deployedAddress;
+        assembly {{ deployedAddress := create(0, add(initCode, 0x20), mload(initCode)) }}
+        if (deployedAddress == address(0)) {{
+            verdict = Verdict.Inconclusive;
+            deployed = false;
+            return;
+        }}
+        target = {target_type}(payable(deployedAddress));
+        attacker = new CydraUnauthorizedCaller();
+        deployed = true;
+    }}
+
+    function testUnauthorizedCallerCapabilityDelta() public {{
+        if (!deployed) {{
+            assert(verdict == Verdict.Inconclusive);
+            _recordVerdict();
+            return;
+        }}
+{before_observation}
+        (bool ok, bytes memory returnData) = attacker.execute(
             address(target),
             abi.encodeWithSignature(
-                "{function.name}({','.join(parameter.type.split()[0] for parameter in function.parameters)})",
-                {arguments}
+                "{function.name}({','.join(parameter.type.split()[0] for parameter in function.parameters)})"{encoded_arguments}
             )
         );
-{call_assertion}
+{post_observation}
+{verdict_logic}
+        if (verdict == Verdict.Inconclusive && bytes(verdictReason).length == 0) verdictReason = "runtime_outcome_not_discriminating";
+        assert(verdict != Verdict.None);
+        _recordVerdict();
     }}
 }}
 '''

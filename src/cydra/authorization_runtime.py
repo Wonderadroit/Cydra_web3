@@ -17,6 +17,8 @@ class AuthorizationBlindOutcome:
     evidence: Evidence
     internal_status: str
     benchmark_status: str
+    verdict: str
+    verdict_reason: str | None = None
 
 
 def _security_assertion_failed(execution: ExecutionResult) -> bool:
@@ -28,35 +30,58 @@ def classify_authorization_blind_execution(
     hypothesis: Hypothesis,
     execution: ExecutionResult,
 ) -> AuthorizationBlindOutcome:
-    """Classify one-sided authorization evidence without a patched oracle.
-
-    The generated experiment asserts the invariant directly: an arbitrary caller
-    must not successfully mutate the modeled administrative state. A passing test
-    therefore means this experiment did not reproduce the suspected violation.
-    A failure is only promotable when Foundry reports the explicit CYDRA security
-    assertion, rather than a compiler/deployment/tool failure.
-    """
+    """Classify the generated harness's state-backed verdict, not test pass/fail."""
     evidence_id = f"E-EXEC-{hypothesis.hypothesis_id}-AUTHORIZATION-BLIND"
     output = f"{execution.stdout}\n{execution.stderr}"
-    if execution.status == "UNMEASURABLE" or not execution.executed:
-        semantics = "unmeasurable"
-        internal_status = benchmark_status = "proposed"
-    elif execution.status == "PASS":
-        semantics = "security_invariant_preserved"
+    labels = {
+        "0": "none",
+        "1": "supported",
+        "2": "rejected",
+        "3": "inconclusive",
+        "4": "unmeasurable",
+    }
+    matches = re.findall(
+        r"CYDRA_VERDICT[:\s]+(supported|rejected|inconclusive|unmeasurable|[0-4])",
+        output,
+        re.IGNORECASE,
+    )
+    raw_verdict = matches[-1].lower() if matches else None
+    verdict = labels.get(raw_verdict, raw_verdict) if raw_verdict is not None else None
+
+    reason_match = re.findall(r"CYDRA_VERDICT_REASON[:\s]+([a-zA-Z0-9_ -]+)", output, re.IGNORECASE)
+    verdict_reason = reason_match[-1].strip().lower().replace(" ", "_") if reason_match else None
+
+    if verdict == "supported":
+        semantics = "unauthorized_authority_gain"
+        internal_status, benchmark_status = "confirmed", "confirmed"
+    elif verdict == "rejected":
+        semantics = "authority_gain_not_observed"
         internal_status, benchmark_status = "rejected", "not_confirmed"
-    elif _security_assertion_failed(execution):
-        semantics = "unauthorized_state_mutation"
-        internal_status = benchmark_status = "confirmed"
+    elif verdict == "inconclusive":
+        semantics = "experiment_inconclusive"
+        internal_status, benchmark_status = "proposed", "inconclusive"
+    elif verdict == "unmeasurable":
+        semantics = "authority_delta_unmeasurable"
+        internal_status, benchmark_status = "proposed", "unmeasurable"
+    elif execution.status == "UNMEASURABLE" or not execution.executed:
+        verdict = "unmeasurable"
+        semantics = "harness_not_executed"
+        internal_status, benchmark_status = "proposed", "unmeasurable"
+    elif execution.status == "FAIL":
+        verdict = "inconclusive"
+        semantics = "execution_failed_without_verdict"
+        internal_status, benchmark_status = "proposed", "inconclusive"
     else:
-        semantics = "non_security_execution_failure"
-        internal_status = benchmark_status = "proposed"
+        verdict = "inconclusive"
+        semantics = "runtime_verdict_missing"
+        internal_status, benchmark_status = "proposed", "inconclusive"
 
     evidence = Evidence(
         evidence_id,
         "execution",
         (
-            f"Blind authorization experiment: status={execution.status}, "
-            f"semantics={semantics}, executed={execution.executed}, "
+            f"Blind authorization experiment: verdict={verdict}, semantics={semantics}, "
+            f"status={execution.status}, executed={execution.executed}, "
             f"tests_run={execution.tests_run}, tests_failed={execution.tests_failed}, "
             f"exit={execution.exit_code}."
         ),
@@ -75,9 +100,6 @@ def classify_authorization_blind_execution(
         hypothesis.related_functions,
     )
     return AuthorizationBlindOutcome(
-        updated, execution, evidence, internal_status, benchmark_status
+        updated, execution, evidence, internal_status, benchmark_status, verdict, verdict_reason
     )
 
-
-def security_assertion_marker() -> str:
-    return _SECURITY_MARKER

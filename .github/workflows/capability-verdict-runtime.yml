@@ -1,0 +1,96 @@
+name: Capability Verdict Runtime Calibration
+
+on:
+  push:
+    branches:
+      - "test/permissionless-factory-negative-control"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  four-verdict-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+      - name: Install Foundry test utilities
+        working-directory: tests/fixtures/capability_verdict_runtime
+        run: forge install foundry-rs/forge-std --no-commit
+      - name: Generate four tests through CYDRA's authorization harness generator
+        env:
+          PYTHONPATH: src
+        run: python scripts/generate_capability_verdict_controls.py
+      - name: Execute four hand-authored runtime fixtures
+        working-directory: tests/fixtures/capability_verdict_runtime
+        run: |
+          set -o pipefail
+          forge test --match-path 'test/VerdictRuntime.t.sol' -vv 2>&1 | tee "$RUNNER_TEMP/capability-verdict-fixtures.log"
+      - name: Execute four generated authorization harnesses
+        working-directory: tests/fixtures/capability_verdict_runtime
+        run: |
+          set -o pipefail
+          forge test -vv 2>&1 | tee "$RUNNER_TEMP/capability-verdict-runtime.log"
+      - name: Record structured generated-harness verdict artifact
+        if: always()
+        run: |
+          python scripts/record_capability_verdict_artifact.py \
+            "$RUNNER_TEMP/capability-verdict-runtime.log" \
+            "$RUNNER_TEMP/capability-verdict-runtime.json"
+      - name: Upload runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cydra-capability-verdict-runtime
+          path: |
+            ${{ runner.temp }}/capability-verdict-fixtures.log
+            ${{ runner.temp }}/capability-verdict-runtime.log
+            ${{ runner.temp }}/capability-verdict-runtime.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  grunt-pinned-comparison:
+    if: github.ref == 'refs/heads/test/permissionless-factory-negative-control'
+    needs: four-verdict-runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: foundry-rs/foundry-toolchain@v1
+      - run: python -m pip install --upgrade pip pytest
+      - run: python -m pip install -e .
+      - name: Validate the same authorized Grunt target intake
+        run: |
+          python scripts/validate_campaign_intake.py \
+            --program-url "https://bountyhunte.rs/programs/3f-company-d558609e" \
+            --target-repo "https://github.com/3FLabs/grunt" \
+            --target-ref "96a18e376e8f95bbb243a774609945749d3a0b3e" \
+            --target-path "src" \
+            --target-project "."
+      - name: Rerun the pinned Grunt campaign after seed-to-hypothesis separation
+        env:
+          PYTHONPATH: src
+        run: |
+          set -o pipefail
+          python scripts/run_authorization_scope_campaign.py \
+            --target-repo "https://github.com/3FLabs/grunt" \
+            --target-ref "96a18e376e8f95bbb243a774609945749d3a0b3e" \
+            --target-path "src" \
+            --target-project "." \
+            --output-dir "$RUNNER_TEMP/grunt-after-verdict-calibration" \
+            2>&1 | tee "$RUNNER_TEMP/grunt-after-verdict-calibration.log"
+      - name: Upload pinned Grunt comparison evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cydra-grunt-after-verdict-calibration
+          path: |
+            ${{ runner.temp }}/grunt-after-verdict-calibration/
+            ${{ runner.temp }}/grunt-after-verdict-calibration.log
+          if-no-files-found: warn
+          retention-days: 14

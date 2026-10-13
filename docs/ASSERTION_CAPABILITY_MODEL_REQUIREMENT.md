@@ -1,0 +1,76 @@
+# Assertion-layer requirement: capability delta, not storage delta
+
+Status: **four-verdict runtime calibration implemented and verified; pinned Grunt campaign comparison pending review**.
+
+Tracking regression: [PR #42 — permissionless factory false-positive control](https://github.com/Wonderadroit/Cydra_web3/pull/42).
+
+## Verdict model
+
+The assertion layer must distinguish four outcomes:
+- **supported:** the experiment measured an unauthorized authority gain over a pre-existing resource.
+- **rejected:** the experiment measured no such authority gain; the call was benign with respect to this narrow check.
+- **inconclusive:** setup or execution failed (for example, deployment failure, invalid arguments, or a call that could not be meaningfully exercised).
+- **unmeasurable:** the experiment ran, but the model could not establish the relevant authority delta because the resource, role, or supported read interface could not be established.
+
+Never collapse unmeasurable into rejected. Unknown is not evidence of safety.
+
+## Calibration cases
+
+### Negative control: permissionless factory
+
+`PermissionlessFactory.create()` deploys a fresh child and writes `_isChild[child] = true`. The registry entry is factory storage, but its key is the newly created child and the write records that creation. A successful call plus a storage write is not, by itself, evidence that the caller gained authority.
+
+The generator now stores a typed verdict in public harness state and records that state to the Foundry output for structured artifact capture. It does not use events or a verdict-triggered revert as the signal. A public state getter alone is not an authority relationship; without a supported authority read, this fixture returns `unmeasurable`.
+
+**Observed runtime verdict for this fixture: `unmeasurable`.** The generated Foundry harness executed and the structured artifact matched this expected verdict. The positive, guarded, and broken-setup generated harnesses likewise returned `supported`, `rejected`, and `inconclusive`, respectively.
+
+### Positive control: unauthorized authority gain
+
+The runtime fixture uses an already-existing protected resource and a source-grounded access-control relationship. An unrelated caller invokes an unguarded `setTarget` operation that grants that caller `DEFAULT_ADMIN_ROLE`. The generated harness observes membership as false before the call and true afterward, then records `supported`.
+
+The positive control must use a supported authority read, not infer privilege from the call result or arbitrary storage changes. For the first implementation, supported on-chain reads are deliberately limited to:
+- Ownable-style `owner()` reads.
+- OpenZeppelin AccessControl-style `hasRole(bytes32,address)` reads.
+
+Custom role systems and unsupported access-control surfaces are **unmeasurable/NOT_READY**, not safe by default. Do not pretend the supported interface list is exhaustive.
+
+## Required assertion semantics
+
+A generated experiment must have three explicit phases:
+
+1. **Setup:** deploy/initialize the target and establish any required pre-state.
+2. **Baseline observation:** query supported, source-grounded authority relationships for the actor and resource before the call.
+3. **Call and post-observation:** execute the planned call, then query the same authority relationships and compare the results.
+
+For the first iteration, the narrow null hypothesis is:
+
+> An unrelated caller that did not hold a supported authority membership before the experiment should not gain that membership over a pre-existing resource as a side effect of the experiment.
+
+This is an observable calibration invariant, not a claim that CYDRA has inferred developer intent or proved every unauthorized access-control change is a vulnerability. Full source-derived invariant discovery remains a separate milestone.
+
+Authority means membership in a resource's access-control relationships, not merely the ability to call a function. Examples include ownership, a recognized role, or another explicitly supported delegation/approval relation. Each observation must identify:
+- the actor address;
+- the resource address and whether it existed before the call;
+- the authority interface and role/relationship being queried;
+- the before and after values;
+- the call result and any revert data.
+
+The initial implementation supports only the on-chain read interfaces listed above. Reads must be made against the same execution state/block context used by the experiment. If the relevant resource, role identifier, or read interface cannot be established, return an explicit unmeasurable/NOT_READY outcome rather than assuming no authority exists.
+
+## Resource identity and factory boundary
+
+A registry write keyed by a fresh child created during the same call is not itself a privilege gain. The negative control must stay silent because it creates a child and records its address without changing the caller's authority over a pre-existing resource.
+
+Do **not** implement a rule that says new resources are always safe. A factory can create a resource with a dangerous authority configuration, or alter a beacon/implementation's ownership relationship. Those cases require the resource and authority relationship to be observed and assessed; they must not be silently filtered out as safe. The first null-hypothesis control in this milestone specifically measures authority membership changes over pre-existing resources, so authority effects on newly created resources that cannot be classified by the supported model must remain explicit candidates/unmeasurable—not a clean security verdict.
+
+Do not infer trust boundaries from names, storage writes, public visibility, or successful execution alone.
+
+## Required regression behavior
+
+- The permissionless factory negative control's post-fix verdict is exactly `unmeasurable`, not `rejected`.
+- The positive control detects the caller's new supported authority membership over the pre-existing resource and returns `supported`.
+- A successful call alone never proves unauthorized privilege gain.
+- Setup/execution failure returns `inconclusive`; unsupported or insufficient authority observations return `unmeasurable`.
+- No blanket factory/new-resource suppression rule is allowed.
+- All four generated harnesses and all four independent runtime fixture paths must pass with the expected verdict stored in the artifact.
+- The false-positive fix is not fully accepted until the pinned Grunt campaign comparison shows `TransferGuardFactory.createTransferGuard` as `unmeasurable` and no unexplained new `supported` outcomes.
