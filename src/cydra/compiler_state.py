@@ -324,7 +324,9 @@ def _compile_hardhat_state_effects(project_path: Path, source_path: Path) -> Com
     if installed.returncode != 0:
         return CompilerEvidenceResult(
             (), (), True, "dependency_install_failed", install_command,
-            installed.stdout, installed.stderr,
+            installed.stdout, installed.stderr, (), (), 0, 0, False, 0, (),
+            _compiler_version_attempted(project_path, source_path, installed.stderr),
+            _stderr_excerpt(installed.stderr), "not_produced",
         )
 
     build_info_root = _hardhat_build_info_root(project_path)
@@ -336,9 +338,16 @@ def _compile_hardhat_state_effects(project_path: Path, source_path: Path) -> Com
     stdout = installed.stdout + "\n" + completed.stdout
     stderr = installed.stderr + "\n" + completed.stderr
     if completed.returncode != 0:
+        matched_source_count, source_ast_found = _build_info_ast_diagnostics(
+            build_files, source_path, project_path
+        )
         return CompilerEvidenceResult(
             (), (), True, "compile_failed", compile_command, stdout, stderr,
-            tuple(map(str, build_files)),
+            tuple(map(str, build_files)), (), len(build_files), matched_source_count,
+            source_ast_found, 0, (),
+            _compiler_version_attempted(project_path, source_path, stderr),
+            _stderr_excerpt(stderr),
+            _source_ast_status(matched_source_count, source_ast_found, len(build_files)),
         )
 
     evidence: list[SemanticRelationshipEvidence] = []
@@ -383,11 +392,15 @@ def _compile_hardhat_state_effects(project_path: Path, source_path: Path) -> Com
         status = "source_present_without_ast"
     else:
         status = "no_ast_for_source"
+    version_list = tuple(sorted(versions))
     return CompilerEvidenceResult(
         tuple(unique_evidence.values()), unique_constraints, True, status, compile_command,
-        stdout, stderr, tuple(map(str, build_files)), tuple(sorted(versions)),
+        stdout, stderr, tuple(map(str, build_files)), version_list,
         len(build_files), matched_source_count, source_ast_found,
         len(dependency_sources), tuple(sorted(unresolved_imports)),
+        version_list[0] if version_list else _compiler_version_attempted(project_path, source_path, stderr),
+        _stderr_excerpt(stderr),
+        _source_ast_status(matched_source_count, source_ast_found, len(build_files)),
     )
 
 
