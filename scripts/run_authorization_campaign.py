@@ -475,9 +475,10 @@ def main() -> int:
         _prepare_isolated_foundry_project(project, source, execution_project)
         for dependency in args.target_npm_dependency:
             package_name = dependency.split("@", 1)[0] if not dependency.startswith("@") else dependency.rsplit("@", 1)[0]
-            if package_name == "@openzeppelin/contracts":
-                package_source = project / "node_modules" / "@openzeppelin" / "contracts"
-                package_destination = execution_project / "node_modules" / "@openzeppelin" / "contracts"
+            if package_name in {"@openzeppelin/contracts", "@openzeppelin/contracts-upgradeable"}:
+                package_leaf = package_name.split("/", 1)[1]
+                package_source = project / "node_modules" / "@openzeppelin" / package_leaf
+                package_destination = execution_project / "node_modules" / "@openzeppelin" / package_leaf
                 package_destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copytree(package_source, package_destination, dirs_exist_ok=True)
                 # Foundry does not search npm's node_modules tree by default.
