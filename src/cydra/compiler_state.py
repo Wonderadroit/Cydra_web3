@@ -215,25 +215,25 @@ def _compiler_version_attempted(project: Path, source: Path, stderr: str = "") -
         config = (project / "foundry.toml").read_text(encoding="utf-8")
     except (OSError, UnicodeError):
         config = ""
-    match = re.search(r"^\\s*solc\\s*=\\s*[\"']([^\"']+)[\"']", config, re.MULTILINE)
+    match = re.search(r"^\s*solc\s*=\s*["']([^"']+)["']", config, re.MULTILINE)
     if match:
         return match.group(1)
     try:
         source_text = source.read_text(encoding="utf-8")
     except (OSError, UnicodeError):
         source_text = ""
-    match = re.search(r"\\bpragma\\s+solidity\\s+([^;]+);", source_text)
+    match = re.search(r"\bpragma\s+solidity\s+([^;]+);", source_text)
     if match:
-        exact = re.fullmatch(r"(?:=\\s*)?(\\d+\\.\\d+\\.\\d+)", match.group(1).strip())
+        exact = re.fullmatch(r"(?:=\s*)?(\d+\.\d+\.\d+)", match.group(1).strip())
         if exact:
             return exact.group(1)
-    match = re.search(r"(?:solc|compiler)(?: version)?\\s*[=:]?\\s*v?(\\d+\\.\\d+\\.\\d+)", stderr, re.IGNORECASE)
+    match = re.search(r"(?:solc|compiler)(?: version)?\s*[=:]?\s*v?(\d+\.\d+\.\d+)", stderr, re.IGNORECASE)
     return match.group(1) if match else None
 
 
 def _stderr_excerpt(stderr: str, max_lines: int = 40, max_chars: int = 4000) -> str:
     """Bound compiler diagnostics while preserving the beginning of stderr."""
-    return "\\n".join(stderr.splitlines()[:max_lines])[:max_chars]
+    return "\n".join(stderr.splitlines()[:max_lines])[:max_chars]
 
 
 def _source_ast_status(matched_source_count: int, source_ast_found: bool, build_info_count: int) -> str:
