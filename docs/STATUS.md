@@ -120,3 +120,17 @@ The parser now models direct writes, same-contract helper-mediated writes, payab
 - This is an observability improvement, not a security pass or vulnerability finding. The compiler status remains ambiguous (`no_ast_for_source`), and no paired signature/witness execution has been run.
 - Full report: `docs/campaigns/2026-10-11-0x-settler-inherited-provenance.md`.
 - Next: clarify compiler/AST status and add local paired valid/invalid signature-witness execution tests before trying to claim the inherited meta-transaction authorization boundary is covered.
+
+
+## Symbiotic isolated-staging validation — 2026-10-13
+
+- Pull request: https://github.com/Wonderadroit/Cydra_web3/pull/46
+- Pinned target: `sherlock-audit/2025-06-symbiotic-relay@435a21fd81bcd588439feef3108580f535b9e5eb`
+- Source: `middleware-sdk/lib/core/src/contracts/vault/Vault.sol`
+- Workflow run: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38371729717
+- Artifact: https://github.com/Wonderadroit/Cydra_web3/actions/runs/38371729717/artifacts/11799875469
+- Result: target checkout and nested submodules were staged; Foundry compilation succeeded; the generated test executed (1 passed, 0 failed); the harness emitted `CYDRA_VERDICT 4` with `no_authority_getter`; campaign exited 2 because the result was unmeasurable/not ready and `REQUIRE_READY=true`.
+- Artifact audit: the uploaded ZIP contains `authorization-campaign.log` and `target-intake.txt`; it does **not** contain `authorization-campaign.json`. The log independently records compilation/execution and the unmeasurable verdict, but the structured JSON output was not included in the uploaded artifact. Treat that as an artifact-packaging/observability gap, not evidence that the staging fix failed.
+- Candidate binding remains a separate issue: the run generated `H-AUTH-claim`, not the requested `X-H-AUTH-setSlasher`. Track only in Issue #47: https://github.com/Wonderadroit/Cydra_web3/issues/47. Do not change candidate selection in the staging-fix cycle.
+- `no_authority_getter` is not diagnostic evidence about `setSlasher`, because the executed candidate was `claim`. Defer that interpretation until the candidate-binding defect is fixed and the intended function is tested.
+- No finding, security pass, or authorization-bypass reproduction is claimed.
