@@ -5,7 +5,8 @@ from pathlib import Path
 import re
 from typing import Literal
 
-from .models import ContractModel, FunctionModel\nfrom .reasoning import modifier_restriction_category
+from .models import ContractModel, FunctionModel
+from .reasoning import modifier_restriction_category
 
 SeedStatus = Literal["seed", "testable", "blocked"]
 InvariantSource = Literal["derived", "generic"]
