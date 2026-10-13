@@ -30,81 +30,81 @@ def _seed_coverage_allows_measurement(hypotheses, seeds) -> bool:
 
 
 def _prepare_isolated_foundry_project(target_root: Path, source: Path, destination: Path) -> Path:
-    """Copy only the target's local Solidity import closure into a clean Foundry root."""
-    source_root = next(
-        (
-            candidate
-            for candidate in (source.parents)
-            if candidate.name in {"src", "contracts"}
-        ),
-        target_root,
-    )
-    src_root = destination / "src"
-    src_root.mkdir(parents=True, exist_ok=True)
+    """Stage the import closure without relocating files relative to the selected project root."""
+    src_root = destination
     test_root = destination / "test" / "generated"
     test_root.mkdir(parents=True, exist_ok=True)
 
     pending = [source]
     copied: set[Path] = set()
+    unresolved: list[dict[str, str]] = []
+    remappings: list[tuple[str, str]] = []
+    remappings_file = target_root / "remappings.txt"
+    if remappings_file.exists():
+        for line in remappings_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            prefix, destination_path = line.split("=", 1)
+            remappings.append((prefix, destination_path))
+
     while pending:
-        current = pending.pop()
-        try:
-            relative = current.relative_to(source_root)
-            destination_file = src_root / relative
-        except ValueError:
-            # Preserve repository-root paths for vendored dependencies (for
-            # example lib/solady/...), otherwise Solidity imports such as
-            # "lib/solady/src/..." will still point at a missing execution path.
-            relative = current.relative_to(target_root)
-            destination_file = destination / relative
+        current = pending.pop().resolve()
         if current in copied:
             continue
+        try:
+            relative = current.relative_to(target_root.resolve())
+        except ValueError:
+            unresolved.append({
+                "importer": str(current),
+                "import": "",
+                "reason": "dependency_resolved_outside_selected_project_root",
+            })
+            continue
         copied.add(current)
+        destination_file = src_root / relative
         destination_file.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(current, destination_file)
 
         text = current.read_text(encoding="utf-8")
-        remappings = []
-        remappings_file = target_root / "remappings.txt"
-        if remappings_file.exists():
-            for line in remappings_file.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                prefix, destination_path = line.split("=", 1)
-                remappings.append((prefix, destination_path))
         for imported in _IMPORT_RE.findall(text):
+            dependency = None
             if imported.startswith("."):
                 dependency = (current.parent / imported).resolve()
             elif imported.startswith(("contracts/", "lib/", "node_modules/")):
-                # These are repository-root imports, not source-root imports.
                 dependency = (target_root / imported).resolve()
             else:
-                dependency = None
                 for prefix, destination_path in sorted(remappings, key=lambda item: len(item[0]), reverse=True):
                     if imported.startswith(prefix):
                         suffix = imported[len(prefix):]
                         dependency = (target_root / destination_path / suffix).resolve()
                         break
                 if dependency is None:
-                    continue
-            if dependency.is_file() and dependency not in copied:
-                pending.append(dependency)
+                    # Package imports may be resolvable directly from node_modules.
+                    dependency = (target_root / "node_modules" / imported).resolve()
+            if dependency.is_file():
+                if dependency not in copied:
+                    pending.append(dependency)
+            else:
+                unresolved.append({
+                    "importer": str(current.relative_to(target_root.resolve())),
+                    "import": imported,
+                    "expected_path": str(dependency.relative_to(target_root.resolve())) if dependency.is_relative_to(target_root.resolve()) else str(dependency),
+                    "reason": "import_not_found_in_pinned_project",
+                })
+
+    if unresolved:
+        detail = json.dumps(unresolved, sort_keys=True)
+        raise RuntimeError("staging_unsupported: unresolved import closure: " + detail)
 
     remapping_lines = []
     for prefix, destination_path in remappings:
-        # The isolated project preserves repository-root dependency paths.
-        # Only dependencies that are not already rooted at lib/ or node_modules/
-        # are staged under src/.
-        if destination_path.startswith(("node_modules/", "lib/")):
-            remapped_destination = destination_path
-        else:
-            remapped_destination = f"src/{destination_path}"
-        remapping_lines.append(f"{prefix}={remapped_destination}")
+        # The selected project's relative directory structure is preserved verbatim.
+        remapping_lines.append(f"{prefix}={destination_path}")
     remapping_literal = ", ".join(repr(item) for item in remapping_lines)
     (destination / "foundry.toml").write_text(
         '[profile.default]\n'
-        'src = "src"\n'
+        'src = "."\n'
         'test = "test"\n'
         'libs = ["lib"]\n'
         'auto_detect_solc = true\n'
@@ -115,7 +115,7 @@ def _prepare_isolated_foundry_project(target_root: Path, source: Path, destinati
     hardhat_console.parent.mkdir(parents=True, exist_ok=True)
     hardhat_console.write_text("pragma solidity ^0.6.12; library console {}\n", encoding="utf-8")
     (destination / "remappings.txt").write_text(
-        "\n".join(remapping_lines) + "\n",
+        "\n".join(remapping_lines) + ("\n" if remapping_lines else ""),
         encoding="utf-8",
     )
     return test_root
@@ -472,7 +472,7 @@ def main() -> int:
             )
 
         execution_project = Path(temp) / "execution-project"
-        _prepare_isolated_foundry_project(checkout, source, execution_project)
+        _prepare_isolated_foundry_project(project, source, execution_project)
         for dependency in args.target_npm_dependency:
             package_name = dependency.split("@", 1)[0] if not dependency.startswith("@") else dependency.rsplit("@", 1)[0]
             if package_name == "@openzeppelin/contracts":
@@ -520,7 +520,7 @@ def main() -> int:
                     hypothesis,
                     experiment,
                     os.path.relpath(
-                        execution_project / "src" / Path(contract.source).relative_to(source_root),
+                        execution_project / Path(contract.source),
                         output.parent,
                     ).replace(os.sep, "/"),
                     contract.name,
@@ -583,7 +583,7 @@ def main() -> int:
                 return 2
             payload={"target":f"{args.target_repo}@{args.target_ref}:{args.target_path}","hypothesis_seeds":_json(getattr(result, "seeds", ())),"hypothesis":_json(hypothesis),"experiment":_json(experiment),"blind_execution":_json(execution),"classification":outcome.benchmark_status,"verdict":outcome.verdict,"verdict_reason":outcome.verdict_reason,"finding_gate":"CONFIRMED_ONLY"}
             if args.require_ready and outcome.benchmark_status=="confirmed":
-                isolated_source = execution_project / "src" / source_relative
+                isolated_source = execution_project / source_relative
                 auth_context = "\n".join(
                     path.read_text(encoding="utf-8")
                     for path in sorted((execution_project / "src").rglob("*.sol"))
