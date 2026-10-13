@@ -32,6 +32,9 @@ class CompilerEvidenceResult:
     source_ast_found: bool = False
     source_dependency_count: int = 0
     unresolved_imports: tuple[str, ...] = ()
+    compiler_version_attempted: str | None = None
+    stderr_excerpt: str = ""
+    source_ast_status: str = "unknown"
 
 
 def _source_keys(payload: dict[str, Any], source: Path, project: Path) -> tuple[tuple[str, dict[str, Any]], ...]:
@@ -206,6 +209,43 @@ def extract_constraints_from_build_info(
     return tuple(dict.fromkeys(evidence))
 
 
+def _compiler_version_attempted(project: Path, source: Path, stderr: str = "") -> str | None:
+    """Report the configured or exact-pragmatic solc version, including on failed builds."""
+    try:
+        config = (project / "foundry.toml").read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        config = ""
+    match = re.search(r"""^\s*solc\s*=\s*["']([^"']+)["']""", config, re.MULTILINE)
+    if match:
+        return match.group(1)
+    try:
+        source_text = source.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        source_text = ""
+    match = re.search(r"\bpragma\s+solidity\s+([^;]+);", source_text)
+    if match:
+        exact = re.fullmatch(r"(?:=\s*)?(\d+\.\d+\.\d+)", match.group(1).strip())
+        if exact:
+            return exact.group(1)
+    match = re.search(r"(?:solc|compiler)(?: version)?\s*[=:]?\s*v?(\d+\.\d+\.\d+)", stderr, re.IGNORECASE)
+    return match.group(1) if match else None
+
+
+def _stderr_excerpt(stderr: str, max_lines: int = 40, max_chars: int = 4000) -> str:
+    """Bound compiler diagnostics while preserving the beginning of stderr."""
+    return "\n".join(stderr.splitlines()[:max_lines])[:max_chars]
+
+
+def _source_ast_status(matched_source_count: int, source_ast_found: bool, build_info_count: int) -> str:
+    if source_ast_found:
+        return "produced"
+    if matched_source_count:
+        return "source_present_without_ast"
+    if build_info_count:
+        return "no_matching_source_ast"
+    return "not_produced"
+
+
 def _build_info_ast_diagnostics(
     build_files: tuple[Path, ...], source: Path, project: Path
 ) -> tuple[int, bool]:
@@ -284,7 +324,9 @@ def _compile_hardhat_state_effects(project_path: Path, source_path: Path) -> Com
     if installed.returncode != 0:
         return CompilerEvidenceResult(
             (), (), True, "dependency_install_failed", install_command,
-            installed.stdout, installed.stderr,
+            installed.stdout, installed.stderr, (), (), 0, 0, False, 0, (),
+            _compiler_version_attempted(project_path, source_path, installed.stderr),
+            _stderr_excerpt(installed.stderr), "not_produced",
         )
 
     build_info_root = _hardhat_build_info_root(project_path)
@@ -296,9 +338,16 @@ def _compile_hardhat_state_effects(project_path: Path, source_path: Path) -> Com
     stdout = installed.stdout + "\n" + completed.stdout
     stderr = installed.stderr + "\n" + completed.stderr
     if completed.returncode != 0:
+        matched_source_count, source_ast_found = _build_info_ast_diagnostics(
+            build_files, source_path, project_path
+        )
         return CompilerEvidenceResult(
             (), (), True, "compile_failed", compile_command, stdout, stderr,
-            tuple(map(str, build_files)),
+            tuple(map(str, build_files)), (), len(build_files), matched_source_count,
+            source_ast_found, 0, (),
+            _compiler_version_attempted(project_path, source_path, stderr),
+            _stderr_excerpt(stderr),
+            _source_ast_status(matched_source_count, source_ast_found, len(build_files)),
         )
 
     evidence: list[SemanticRelationshipEvidence] = []
@@ -343,11 +392,15 @@ def _compile_hardhat_state_effects(project_path: Path, source_path: Path) -> Com
         status = "source_present_without_ast"
     else:
         status = "no_ast_for_source"
+    version_list = tuple(sorted(versions))
     return CompilerEvidenceResult(
         tuple(unique_evidence.values()), unique_constraints, True, status, compile_command,
-        stdout, stderr, tuple(map(str, build_files)), tuple(sorted(versions)),
+        stdout, stderr, tuple(map(str, build_files)), version_list,
         len(build_files), matched_source_count, source_ast_found,
         len(dependency_sources), tuple(sorted(unresolved_imports)),
+        version_list[0] if version_list else _compiler_version_attempted(project_path, source_path, stderr),
+        _stderr_excerpt(stderr),
+        _source_ast_status(matched_source_count, source_ast_found, len(build_files)),
     )
 
 
@@ -390,7 +443,17 @@ def compile_state_effects(project: str | Path, source: str | Path) -> CompilerEv
             command = retry_command
             build_files = tuple(sorted(info_path.rglob("*.json")))
         if completed.returncode != 0:
-            return CompilerEvidenceResult((), (), True, "compile_failed", command, completed.stdout, completed.stderr, tuple(map(str, build_files)))
+            matched_source_count, source_ast_found = _build_info_ast_diagnostics(
+                build_files, source_path, project_path
+            )
+            return CompilerEvidenceResult(
+                (), (), True, "compile_failed", command, completed.stdout, completed.stderr,
+                tuple(map(str, build_files)), (), len(build_files), matched_source_count,
+                source_ast_found, 0, (),
+                _compiler_version_attempted(project_path, source_path, completed.stderr),
+                _stderr_excerpt(completed.stderr),
+                _source_ast_status(matched_source_count, source_ast_found, len(build_files)),
+            )
 
         evidence: list[SemanticRelationshipEvidence] = []
         constraints: list[ConstraintEvidence] = []
@@ -427,9 +490,13 @@ def compile_state_effects(project: str | Path, source: str | Path) -> CompilerEv
             status = "source_present_without_ast"
         else:
             status = "no_ast_for_source"
+        version_list = tuple(sorted(versions))
         return CompilerEvidenceResult(
             tuple(evidence), tuple(constraints), True, status, command,
             completed.stdout, completed.stderr, tuple(map(str, build_files)),
-            tuple(sorted(versions)), len(build_files), matched_source_count,
+            version_list, len(build_files), matched_source_count,
             source_ast_found, len(dependency_sources), tuple(sorted(unresolved_imports)),
+            version_list[0] if version_list else _compiler_version_attempted(project_path, source_path, completed.stderr),
+            _stderr_excerpt(completed.stderr),
+            _source_ast_status(matched_source_count, source_ast_found, len(build_files)),
         )
