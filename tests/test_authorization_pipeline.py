@@ -214,21 +214,21 @@ def test_modifier_restrictions_are_classified_structurally(tmp_path: Path):
 
     source = tmp_path / "ModifierCategories.sol"
     source.write_text(
-        "pragma solidity ^0.8.20;\\n"
-        "contract ModifierCategories {\\n"
-        "  address public owner;\\n"
-        "  address public slasher;\\n"
-        "  bool private _entered;\\n"
-        "  bool private _initializing;\\n"
-        "  modifier nonReentrant() { require(!_entered, 'reentrant'); _entered = true; _; _entered = false; }\\n"
-        "  modifier onlyOwner() { require(msg.sender == owner, 'owner'); _; }\\n"
-        "  modifier onlyInitializing() { _checkInitializing(); _; }\\n"
-        "  function _checkInitializing() internal view { require(_initializing, 'not initializing'); }\\n"
-        "  function foo() external nonReentrant { slasher = msg.sender; }\\n"
-        "  function bar() external onlyOwner { slasher = msg.sender; }\\n"
-        "  function baz() external onlyOwner nonReentrant { slasher = msg.sender; }\\n"
-        "  function qux() external onlyInitializing { slasher = msg.sender; }\\n"
-        "}\\n",
+        "pragma solidity ^0.8.20;\n"
+        "contract ModifierCategories {\n"
+        "  address public owner;\n"
+        "  address public slasher;\n"
+        "  bool private _entered;\n"
+        "  bool private _initializing;\n"
+        "  modifier nonReentrant() { require(!_entered, 'reentrant'); _entered = true; _; _entered = false; }\n"
+        "  modifier onlyOwner() { require(msg.sender == owner, 'owner'); _; }\n"
+        "  modifier onlyInitializing() { _checkInitializing(); _; }\n"
+        "  function _checkInitializing() internal view { require(_initializing, 'not initializing'); }\n"
+        "  function foo() external nonReentrant { slasher = msg.sender; }\n"
+        "  function bar() external onlyOwner { slasher = msg.sender; }\n"
+        "  function baz() external onlyOwner nonReentrant { slasher = msg.sender; }\n"
+        "  function qux() external onlyInitializing { slasher = msg.sender; }\n"
+        "}\n",
         encoding="utf-8",
     )
 
