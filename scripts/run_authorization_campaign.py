@@ -39,14 +39,21 @@ def _prepare_isolated_foundry_project(target_root: Path, source: Path, destinati
     copied: set[Path] = set()
     unresolved: list[dict[str, str]] = []
     remappings: list[tuple[str, str]] = []
-    remappings_file = target_root / "remappings.txt"
-    if remappings_file.exists():
-        for line in remappings_file.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
+    for remappings_file in (target_root / "remappings.txt", target_root / "foundry.toml"):
+        if not remappings_file.exists():
+            continue
+        for raw_line in remappings_file.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or line.startswith("["):
                 continue
-            prefix, destination_path = line.split("=", 1)
-            remappings.append((prefix, destination_path))
+            candidates = [line] if "=" in line and not line.startswith('"') and not line.startswith("'") else []
+            if remappings_file.name == "foundry.toml":
+                candidates.extend(re.findall(r"""['"]([^'"]+=[^'"]+)['"]""", line))
+            for candidate in candidates:
+                prefix, destination_path = candidate.split("=", 1)
+                if prefix and destination_path:
+                    remappings.append((prefix, destination_path))
+    remappings = list(dict.fromkeys(remappings))
 
     while pending:
         current = pending.pop().resolve()
@@ -472,7 +479,25 @@ def main() -> int:
             )
 
         execution_project = Path(temp) / "execution-project"
-        _prepare_isolated_foundry_project(project, source, execution_project)
+        try:
+            _prepare_isolated_foundry_project(project, source, execution_project)
+        except RuntimeError as exc:
+            if not str(exc).startswith("staging_unsupported:"):
+                raise
+            payload = {
+                "target": f"{args.target_repo}@{args.target_ref}:{args.target_path}",
+                "classification": "STAGING_UNSUPPORTED",
+                "disposition": "BLOCKED",
+                "finding_gate": "NOT_READY",
+                "staging_diagnostic": str(exc),
+                "hypothesis_seeds": _json(getattr(result, "seeds", ())),
+                "hypothesis": _json(hypotheses[0]) if hypotheses else None,
+            }
+            if args.output:
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                args.output.write_text(json.dumps(_json(payload), indent=2) + "\\n", encoding="utf-8")
+            print("STAGING_UNSUPPORTED", str(exc))
+            return 2
         for dependency in args.target_npm_dependency:
             package_name = dependency.split("@", 1)[0] if not dependency.startswith("@") else dependency.rsplit("@", 1)[0]
             if package_name in {"@openzeppelin/contracts", "@openzeppelin/contracts-upgradeable"}:
