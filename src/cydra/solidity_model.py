@@ -558,9 +558,16 @@ def _inherited_functions(
         functions.extend(base.functions)
         functions.extend(_inherited_functions(root, resolved_path, base.inherits, seen))
     deduped: list[FunctionModel] = []
-    seen_keys: set[tuple[str, int, str]] = set()
+    seen_keys: set[tuple[str, tuple[str, ...]]] = set()
     for function in functions:
-        key = (function.name, function.line, function.visibility)
+        # Solidity's effective function identity is its signature, not its
+        # source location or visibility. Ancestor declarations naturally have
+        # different line numbers; using line here retains duplicate overrides.
+        # ParameterModel.type is populated by _parameters() during extraction.
+        key = (
+            function.name,
+            tuple(parameter.type.strip() for parameter in function.parameters),
+        )
         if key not in seen_keys:
             seen_keys.add(key)
             deduped.append(function)
