@@ -11,7 +11,7 @@ def test_resolves_inherited_owner_getter_with_minimal_sibling_fixture(tmp_path: 
         contract OwnableBase {
             address internal _owner;
             function owner() public view returns (address) { return _owner; }
-            modifier onlyOwner() { require(msg.sender == owner, "owner only"); _; }
+            modifier onlyOwner() { require(msg.sender == owner(), "owner only"); _; }
         }
         contract Target is OwnableBase {
             address public router;
