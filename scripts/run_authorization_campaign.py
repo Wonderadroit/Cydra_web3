@@ -60,17 +60,19 @@ def _resolve_hypothesis_contract(result, hypothesis):
         hypothesis.source_line,
     )
 
+    # Resolve the exact declaration identity on a modeled effective surface.
+    # The containing ContractModel may be the concrete child, while the function's
+    # source/declaring_contract/line correctly identify its ancestor declaration.
     matches = [
         contract
         for contract in result.contracts
-        if contract.name == identity[1]
-        and str(Path(contract.source).resolve()) == identity[0]
-        and sum(
+        if sum(
             1
             for function in contract.functions
             if function.name == identity[2]
             and function.line == identity[3]
             and str(Path(function.source or contract.source).resolve()) == identity[0]
+            and (function.declaring_contract or contract.name) == identity[1]
         ) == 1
     ]
 
@@ -795,7 +797,7 @@ def main() -> int:
             )
             try:
                 contract = _resolve_hypothesis_contract(result, hypothesis)
-            except ValueError as exc:
+            except (ValueError, SystemExit) as exc:
                 # Preserve this candidate's failure and continue measuring the collection.
                 candidate_payload = {
                     "candidate_identity": {
