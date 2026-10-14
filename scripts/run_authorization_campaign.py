@@ -312,7 +312,7 @@ def _git(cwd: Path, *args: str) -> str:
 
 
 def _observed_bool(output: str, field: str) -> bool | None:
-    match = re.search(rf"^\\s*{re.escape(field)}\\s+(true|false)\\s*$", output, re.MULTILINE | re.IGNORECASE)
+    match = re.search(rf"^\s*{re.escape(field)}\s+(true|false)\s*$", output, re.MULTILINE | re.IGNORECASE)
     if match is None:
         return None
     return match.group(1).lower() == "true"
@@ -926,15 +926,15 @@ def main() -> int:
                         and _observed_bool(repro_patched.stdout, "CYDRA_OBS_CALL_SUCCEEDED") is False
                         and _observed_bool(repro_patched.stdout, "CYDRA_OBS_STATE_CHANGED") is False
                     )
-                    print(
-                        "PATCHED_EXECUTION_STATUS", patched.status,
-                        "CAUSAL_VERIFICATION", causal,
-                    )
-                    print(
-                        "REPRODUCTION_EXECUTION_STATUS", reproduction.status,
-                        "REPRODUCTION_PATCHED_EXECUTION_STATUS", repro_patched.status,
-                        "REPRODUCTION_VERIFICATION", repro,
-                    )
+                    print("PATCHED_EXECUTION_STATUS", patched.status)
+                    print("PATCHED_RAW_OBSERVATIONS")
+                    print(patched.stdout)
+                    print("CAUSAL_VERIFICATION", causal)
+                    print("REPRODUCTION_EXECUTION_STATUS", reproduction.status)
+                    print("REPRODUCTION_PATCHED_EXECUTION_STATUS", repro_patched.status)
+                    print("REPRODUCTION_PATCHED_RAW_OBSERVATIONS")
+                    print(repro_patched.stdout)
+                    print("REPRODUCTION_VERIFICATION", repro)
                     candidate_payload.update({
                         "authorization_control": modifier,
                         "patched_execution": _json(patched),
