@@ -124,3 +124,32 @@ def test_direct_declaration_wins_over_same_inherited_signature(tmp_path: Path):
     seeds = generate_hypothesis_seeds((contract,))
     assert len(seeds) == 1
     assert seeds[0].source == str(source)
+
+
+def test_nearest_inherited_declaration_wins_over_distant_ancestor(tmp_path: Path):
+    nearest_source = tmp_path / "Parent.sol"
+    distant_source = tmp_path / "Grandparent.sol"
+    nearest_source.write_text(
+        "contract Parent { function setValue(uint256 next) external { value = next; } }",
+        encoding="utf-8",
+    )
+    distant_source.write_text(
+        "contract Grandparent { function setValue(uint256 next) external {} }",
+        encoding="utf-8",
+    )
+    nearest = FunctionModel(
+        "setValue", "external", (), ("value",), (), 5,
+        parameters=(), source=str(nearest_source), declaring_contract="Parent",
+    )
+    distant = FunctionModel(
+        "setValue", "external", (), (), (), 8,
+        parameters=(), source=str(distant_source), declaring_contract="Grandparent",
+    )
+    contract = ContractModel(
+        "Child", str(nearest_source), (), state_variables=("value",),
+        inherited_functions=(nearest, distant),
+    )
+    seeds = generate_hypothesis_seeds((contract,))
+    assert len(seeds) == 1
+    assert seeds[0].source == str(nearest_source)
+    assert seeds[0].status == "seed"
