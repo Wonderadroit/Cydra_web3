@@ -265,11 +265,11 @@ def generate_blind_authorization_test_from_experiment(
         state_variable_name
         and (
             re.search(
-                rf"\\bmapping\\s*\\([^;]*\\)\\s*(?:(?:public|private|internal)\\s+)?{re.escape(state_variable_name)}\\b",
+                rf"\bmapping\s*\([^;]*\)\s*(?:(?:public|private|internal)\s+)?{re.escape(state_variable_name)}\b",
                 source_text,
             )
             or re.search(
-                rf"\\b(address(?:\\s+payable)?|bool|uint\\d*|int\\d*)\\s+(?:public|private|internal)\\s+{re.escape(state_variable_name)}\\s*;",
+                rf"\b(address(?:\s+payable)?|bool|uint\d*|int\d*)\s+(?:public|private|internal)\s+{re.escape(state_variable_name)}\s*;",
                 source_text,
             )
         )
@@ -277,13 +277,13 @@ def generate_blind_authorization_test_from_experiment(
     fresh_mapping_key = False
     if state_variable_name and not state_getter:
         fresh_key_match = re.search(
-            r"\\b([A-Za-z_$][\\w$]*)\\s*=\\s*address\\s*\\(\\s*new\\s+[A-Za-z_$][\\w$]*",
+            r"\b([A-Za-z_$][\w$]*)\s*=\s*address\s*\(\s*new\s+[A-Za-z_$][\w$]*",
             source_text,
         )
         if fresh_key_match:
             fresh_key = fresh_key_match.group(1)
             fresh_mapping_key = bool(re.search(
-                rf"\\b{re.escape(state_variable_name)}\\s*\\[\\s*{re.escape(fresh_key)}\\s*\\]\\s*=",
+                rf"\b{re.escape(state_variable_name)}\s*\[\s*{re.escape(fresh_key)}\s*\]\s*=",
                 source_text,
             ))
     state_existence_measured = bool(state_getter or fresh_mapping_key)
