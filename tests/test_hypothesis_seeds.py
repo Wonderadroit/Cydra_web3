@@ -187,3 +187,64 @@ def test_inherited_functions_dedupe_by_signature_not_line_and_keep_overloads(tmp
     assert signatures.count(("touch", ("address",))) == 1
     uint_touch = next(item for item in touches if item.parameters[0].type.strip() == "uint256")
     assert uint_touch.source == str(parent.resolve())
+
+
+
+def test_bounded_walk_resolves_internal_effects_with_provenance_and_depth(tmp_path: Path):
+    from cydra.hypothesis_seeds import _bounded_callee_walk
+
+    source = tmp_path / "SettlerLike.sol"
+    source.write_text(
+        "contract SettlerLike { uint256 balance; "
+        "function execute() external { _execute(); } "
+        "function _execute() internal { _write(); } "
+        "function _write() internal { balance = 1; } }",
+        encoding="utf-8",
+    )
+    execute = FunctionModel("execute", "external", (), (), (), 1, source=str(source))
+    run = FunctionModel("_execute", "internal", (), (), (), 1, source=str(source))
+    write = FunctionModel("_write", "internal", (), ("balance",), (), 1, source=str(source))
+    contract = ContractModel(
+        "SettlerLike", str(source), (execute, run, write), state_variables=("balance",)
+    )
+
+    effects, provenance, blocker, depth = _bounded_callee_walk(contract, execute)
+    assert blocker is None
+    assert "resolved_effects" in effects
+    assert "write:balance" in effects
+    assert any("effect_provenance:write:balance:" in item for item in provenance)
+    assert depth == 2
+
+
+def test_bounded_walk_stops_at_signature_authorization_boundary(tmp_path: Path):
+    from cydra.hypothesis_seeds import _bounded_callee_walk
+
+    source = tmp_path / "SignatureBoundary.sol"
+    source.write_text(
+        "contract SignatureBoundary { "
+        "function executeWithPermit() external { _dispatchPermit(); } "
+        "function _dispatchPermit() internal {} }",
+        encoding="utf-8",
+    )
+    entry = FunctionModel("executeWithPermit", "external", (), (), (), 1, source=str(source))
+    dispatch = FunctionModel("_dispatchPermit", "internal", (), (), (), 1, source=str(source))
+    contract = ContractModel("SignatureBoundary", str(source), (entry, dispatch))
+
+    effects, provenance, blocker, _depth = _bounded_callee_walk(contract, entry)
+    assert blocker == "blocked:signature_authorization_unsupported"
+    assert any("blocked:signature_authorization_unsupported" in item for item in provenance)
+
+
+def test_bounded_walk_fails_closed_on_delegatecall_storage_context(tmp_path: Path):
+    from cydra.hypothesis_seeds import _bounded_callee_walk
+
+    source = tmp_path / "Delegate.sol"
+    source.write_text(
+        'contract Delegate { function execute(address target, bytes memory data) external { target.delegatecall(data); } }',
+        encoding="utf-8",
+    )
+    entry = FunctionModel("execute", "external", (), (), (), 1, source=str(source))
+    contract = ContractModel("Delegate", str(source), (entry,))
+
+    _effects, _provenance, blocker, _depth = _bounded_callee_walk(contract, entry)
+    assert blocker == "blocked:delegatecall_storage_context_unmodeled"
