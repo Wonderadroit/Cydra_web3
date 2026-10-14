@@ -168,9 +168,22 @@ def generate_access_control_hypotheses(
     else:
         invariant = access_control_invariant(contract)
     return tuple(
-        Hypothesis(f"H-AUTH-{f.name}", f"{f.name} may permit an unauthorized caller to mutate privileged state.", invariant.invariant_id, f.name, "arbitrary external caller", "privileged configuration or authorization state can be changed", evidence_ids=(f"E-MODEL-{f.name}",))
+        Hypothesis(
+            f"H-AUTH-{f.name}",
+            f"{f.name} may permit an unauthorized caller to mutate privileged state.",
+            invariant.invariant_id,
+            f.name,
+            "arbitrary external caller",
+            "privileged configuration or authorization state can be changed",
+            evidence_ids=(f"E-MODEL-{f.name}",),
+            source_path=str(Path(f.source or contract.source).resolve()),
+            declaring_contract=f.declaring_contract or contract.name,
+            source_line=f.line,
+        )
         for f, modifiers in declared
-        if not modifiers and not _is_caller_scoped_write(contract, f) and not _has_caller_authorization_predicate(f)
+        if not modifiers and f.writes and f.body_scope != "out_of_scope"
+        and not _is_caller_scoped_write(contract, f)
+        and not _has_caller_authorization_predicate(f)
     )
 
 
