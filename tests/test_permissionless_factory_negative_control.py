@@ -6,6 +6,10 @@ from cydra.models import ContractModel, Experiment, FunctionModel, Hypothesis
 
 def _generate(fixture: Path, contract_name: str, function_name: str, writes: tuple[str, ...], tmp_path: Path) -> str:
     source = fixture.read_text(encoding="utf-8")
+    source_line = next(
+        index for index, line in enumerate(source.splitlines(), start=1)
+        if f"function {function_name}(" in line
+    )
     model = ContractModel(
         name=contract_name,
         source=str(fixture.resolve()),
@@ -18,7 +22,7 @@ def _generate(fixture: Path, contract_name: str, function_name: str, writes: tup
                 modifiers=(),
                 writes=writes,
                 external_calls=(),
-                line=10,
+                line=source_line,
                 parameters=(),
                 source=str(fixture.resolve()),
             ),
@@ -33,7 +37,7 @@ def _generate(fixture: Path, contract_name: str, function_name: str, writes: tup
         expected_impact="authority membership can change",
         source_path=str(fixture.resolve()),
         declaring_contract=contract_name,
-        source_line=10,
+        source_line=source_line,
         display_label=f"H-AUTH-{function_name}",
     )
     experiment = Experiment(
@@ -71,3 +75,25 @@ def test_permissionless_factory_verdict_is_unmeasurable_until_authority_is_obser
     assert "require(false" not in generated
     assert "if (deployedAddress == address(0))" in generated
     assert "verdict = Verdict.Inconclusive;" in generated
+
+
+
+def test_transfer_guard_factory_fresh_registry_key_is_not_supported(tmp_path: Path):
+    fixture = Path(__file__).parent / "fixtures" / "permissionless_factory" / "PermissionlessFactory.sol"
+    source = fixture.read_text(encoding="utf-8")
+    assert "contract TransferGuardFactory" in source
+    assert "mapping(address => bool) private _isTransferGuard;" in source
+    assert "address(new TransferGuard())" in source
+    assert "_isTransferGuard[transferGuard] = true;" in source
+
+    generated = _generate(
+        fixture,
+        "TransferGuardFactory",
+        "createTransferGuard",
+        ("_isTransferGuard",),
+        tmp_path,
+    )
+    assert 'verdict = Verdict.Unmeasurable; verdictReason = "no_authority_getter";' in generated
+    assert "observedStateExistedBefore = false;" in generated
+    assert "observedAuthorityModelGovernsState = false;" in generated
+    assert 'verdictReason = "unauthorized_preexisting_authority_governed_state_changed";' not in generated
