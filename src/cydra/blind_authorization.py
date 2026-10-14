@@ -235,6 +235,30 @@ def generate_blind_authorization_test_from_experiment(
                 state_type, state_getter = candidate_type, candidate_name
                 break
 
+    # A bounded sibling comparison distinguishes privileged configuration setters from
+    # permissionless state updates. The inference is recorded explicitly; it is not
+    # applied to arbitrary state changes or newly-created mapping keys.
+    target_is_guarded = bool(re.search(
+        rf"\bfunction\s+{re.escape(function.name)}\s*\([^)]*\)[^{{;]*\bonlyOwner\b",
+        source_text,
+        re.DOTALL,
+    ))
+    guarded_configuration_sibling = any(
+        match.group(1) != function.name
+        for match in re.finditer(
+            r"\bfunction\s+([A-Za-z_$][\w$]*)\s*\([^)]*\)[^{;]*\bonlyOwner\b[^{{;]*\{",
+            source_text,
+            re.DOTALL,
+        )
+    )
+    authority_model_governs_state = bool(
+        ownable_supported
+        and state_getter
+        and function.name.startswith("set")
+        and not target_is_guarded
+        and guarded_configuration_sibling
+    )
+
     # Only a single source-grounded revert string is accepted as a guard oracle.
     guard_strings = set(re.findall(
         r"(?:require|revert)\s*\([^;]*?[\"']([^\"']{3,})[\"']",
@@ -256,13 +280,17 @@ def generate_blind_authorization_test_from_experiment(
         "    address public observedOwnerAfter;",
         "    bool public ownerReadBeforeSucceeded;",
         "    bool public ownerReadAfterSucceeded;",
+        "    string public observedStateVariable;",
+        "    bool public observedStateExistedBefore;",
+        "    bool public observedAuthorityModelGovernsState;",
+        "    bool public observedStateChanged;",
+        "    bool public stateReadBeforeSucceeded;",
+        "    bool public stateReadAfterSucceeded;",
     ]
     if state_getter:
         observation_declarations += [
             f"    {state_type} public observedStateBefore;",
             f"    {state_type} public observedStateAfter;",
-            "    bool public stateReadBeforeSucceeded;",
-            "    bool public stateReadAfterSucceeded;",
         ]
     before_observation = """        observedCaller = address(attacker);
         (bool ownerBeforeOk, bytes memory ownerBeforeData) = address(target).staticcall(abi.encodeWithSignature("owner()"));
@@ -279,7 +307,8 @@ def generate_blind_authorization_test_from_experiment(
         post_observation += f'''
         (bool stateAfterOk, bytes memory stateAfterData) = address(target).staticcall(abi.encodeWithSignature("{state_getter}()"));
         stateReadAfterSucceeded = stateAfterOk && stateAfterData.length >= 32;
-        if (stateReadAfterSucceeded) observedStateAfter = abi.decode(stateAfterData, ({state_type}));'''
+        if (stateReadAfterSucceeded) observedStateAfter = abi.decode(stateAfterData, ({state_type}));
+        observedStateChanged = stateReadBeforeSucceeded && stateReadAfterSucceeded && (observedStateBefore != observedStateAfter);'''
     if role_getter:
         before_observation += "\n        bool hadRoleBefore = target.hasRole(target." + role_getter + "(), address(attacker));"
         post_observation += "\n        bool hasRoleAfter = target.hasRole(target." + role_getter + "(), address(attacker));"
@@ -292,14 +321,42 @@ def generate_blind_authorization_test_from_experiment(
         else if (hadRoleBefore == hasRoleAfter) verdict = Verdict.Rejected;
         else verdict = Verdict.Inconclusive;'''
     elif ownable_supported:
-        verdict_logic = f'''        if (!ok) {{
-            if (observedOwnerBefore != observedOwnerAfter) verdict = Verdict.Inconclusive;
-            else if (bytes(expectedGuard).length == 0) verdict = Verdict.Unmeasurable;
-            else if (keccak256(bytes(_revertReason(returnData))) == keccak256(bytes(expectedGuard))) verdict = Verdict.Rejected;
-            else verdict = Verdict.Inconclusive;
-        }} else if (observedOwnerBefore != address(attacker) && observedOwnerAfter == address(attacker)) verdict = Verdict.Supported;
-        else if (observedOwnerBefore == observedOwnerAfter) verdict = Verdict.Rejected;
-        else verdict = Verdict.Inconclusive;'''
+        verdict_logic = f'''        if (!ownerReadBeforeSucceeded || !ownerReadAfterSucceeded) {{
+            verdict = Verdict.Unmeasurable;
+            verdictReason = "owner_measurement_unavailable";
+        }} else if (observedOwnerBefore == address(attacker)) {{
+            verdict = Verdict.Rejected;
+            verdictReason = "caller_authorized";
+        }} else if (!ok) {{
+            if ({str(target_is_guarded).lower()}) {{
+                verdict = Verdict.Rejected;
+                verdictReason = "guarded_function_reverted";
+            }} else if (observedOwnerBefore != observedOwnerAfter) {{
+                verdict = Verdict.Inconclusive;
+                verdictReason = "authority_changed_during_reverted_call";
+            }} else if (bytes(expectedGuard).length != 0 && keccak256(bytes(_revertReason(returnData))) == keccak256(bytes(expectedGuard))) {{
+                verdict = Verdict.Rejected;
+                verdictReason = "unauthorized_call_reverted";
+            }} else {{
+                verdict = Verdict.Inconclusive;
+                verdictReason = "revert_reason_not_discriminating";
+            }}
+        }} else if (!stateReadBeforeSucceeded || !stateReadAfterSucceeded) {{
+            verdict = Verdict.Unmeasurable;
+            verdictReason = "protected_state_measurement_unavailable";
+        }} else if (!observedStateExistedBefore) {{
+            verdict = Verdict.Unmeasurable;
+            verdictReason = "state_not_preexisting";
+        }} else if (!observedAuthorityModelGovernsState) {{
+            verdict = Verdict.Rejected;
+            verdictReason = "authority_model_not_derived_for_state";
+        }} else if (observedStateChanged) {{
+            verdict = Verdict.Supported;
+            verdictReason = "unauthorized_preexisting_authority_governed_state_changed";
+        }} else {{
+            verdict = Verdict.Rejected;
+            verdictReason = "protected_state_unchanged";
+        }}'''
     else:
         verdict_logic = f'        verdict = Verdict.Unmeasurable; verdictReason = "{ownable_reason}";'
 
@@ -370,6 +427,14 @@ contract CydraBlindAuthorizationTest {{
         ownerBeforeOkLogged;
         (bool ownerAfterOkLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_OWNER_AFTER_READ_OK", ownerReadAfterSucceeded));
         ownerAfterOkLogged;
+        (bool stateNameLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,string)", "CYDRA_OBS_STATE_VARIABLE", observedStateVariable));
+        stateNameLogged;
+        (bool stateExistsLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_STATE_EXISTED_BEFORE", observedStateExistedBefore));
+        stateExistsLogged;
+        (bool stateGovernedLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_AUTHORITY_MODEL_GOVERNS_STATE", observedAuthorityModelGovernsState));
+        stateGovernedLogged;
+        (bool stateChangedLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_STATE_CHANGED", observedStateChanged));
+        stateChangedLogged;
 {observation_logging}
     }}
 
@@ -393,6 +458,9 @@ contract CydraBlindAuthorizationTest {{
         }}
         target = {target_type}(payable(deployedAddress));
         attacker = new CydraUnauthorizedCaller();
+        observedStateVariable = "{state_getter or ""}";
+        observedStateExistedBefore = {str(bool(state_getter)).lower()};
+        observedAuthorityModelGovernsState = {str(authority_model_governs_state).lower()};
         deployed = true;
     }}
 
@@ -412,6 +480,8 @@ contract CydraBlindAuthorizationTest {{
 {post_observation}
 {verdict_logic}
         if (verdict == Verdict.Inconclusive && bytes(verdictReason).length == 0) verdictReason = "runtime_outcome_not_discriminating";
+        if (verdict == Verdict.Rejected && bytes(verdictReason).length == 0) verdictReason = "authority_membership_or_state_control_not_violated";
+        if (verdict == Verdict.Supported && bytes(verdictReason).length == 0) verdictReason = "authority_membership_gained";
         assert(verdict != Verdict.None);
         _recordVerdict();
     }}
