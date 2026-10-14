@@ -249,6 +249,8 @@ def _seed_diagnostic(function, contract, seeds):
         reason = "callee_body_out_of_scope"
     elif "blocked:source_body_unavailable" in provenance:
         reason = "source_body_unavailable"
+    elif "unresolved_path:_execute:callee_effect_or_authorization_unclassified" in provenance:
+        reason = "unresolved_callee_effects"
     elif "blocked:" in provenance:
         reason = next((part.split("blocked:", 1)[1].split()[0] for part in provenance.split() if "blocked:" in part), "blocked_preconditions_unresolved")
     else:
