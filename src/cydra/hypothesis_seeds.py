@@ -160,6 +160,19 @@ def _bounded_callee_walk(
         if re.search(r"(?<![.\w])_dispatchPermit\s*\(", body):
             blockers.append("blocked:signature_authorization_unsupported")
 
+        for match in re.finditer(r"\bsuper\.([A-Za-z_]\w*)\s*\(", body):
+            name = match.group(1)
+            candidates = [
+                candidate for candidate in by_name.get(name, [])
+                if candidate.source != source or candidate.line != item.line
+            ]
+            if not candidates:
+                blockers.append(f"blocked:super_callee_unresolved:{name}:{source}:{item.line}")
+            elif len(candidates) > 1:
+                blockers.append(f"blocked:internal_overload_ambiguous:super.{name}:{source}:{item.line}")
+            else:
+                walk(candidates[0], depth + 1)
+
         for match in re.finditer(r"(?<![.\w])([A-Za-z_]\w*)\s*\(", body):
             name = match.group(1)
             if name in excluded or name == item.name or name == "_dispatchPermit":
