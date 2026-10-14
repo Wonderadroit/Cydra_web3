@@ -36,6 +36,8 @@ jobs:
             --target-ref 7f90fd4489551b69c20d11eeecb17a3f564afb18 \
             --target-path src/DcntEth.sol \
             --target-project . \
+            --mode targeted \
+            --requested-candidate "src/DcntEth.sol::DcntEth::setRouter::20" \
             --require-ready \
             --output "$RUNNER_TEMP/authorization-positive-control.json" \
             2>&1 | tee "$RUNNER_TEMP/authorization-positive-control.log"
