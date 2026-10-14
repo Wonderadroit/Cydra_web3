@@ -31,6 +31,10 @@ def _generate(fixture: Path, contract_name: str, function_name: str, writes: tup
         target_function=function_name,
         attacker_capability="arbitrary external caller",
         expected_impact="authority membership can change",
+        source_path=str(fixture.resolve()),
+        declaring_contract=contract_name,
+        source_line=10,
+        display_label=f"H-AUTH-{function_name}",
     )
     experiment = Experiment(
         experiment_id=f"X-H-AUTH-{function_name}",

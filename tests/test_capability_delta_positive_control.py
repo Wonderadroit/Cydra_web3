@@ -28,7 +28,7 @@ def test_positive_control_detects_new_role_membership(tmp_path: Path):
                 modifiers=(),
                 writes=("target", "_roles"),
                 external_calls=(),
-                line=13,
+                line=15,
                 parameters=(ParameterModel(name="newTarget", type="address"),),
                 source=str(fixture.resolve()),
             ),
@@ -41,6 +41,10 @@ def test_positive_control_detects_new_role_membership(tmp_path: Path):
         target_function="setTarget",
         attacker_capability="arbitrary external caller",
         expected_impact="attacker gains DEFAULT_ADMIN_ROLE on the existing target",
+        source_path=str(fixture.resolve()),
+        declaring_contract="VulnerableAuthority",
+        source_line=15,
+        display_label="H-AUTH-setTarget",
     )
     experiment = Experiment(
         experiment_id="X-H-AUTH-setTarget",

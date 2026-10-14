@@ -24,7 +24,7 @@ def test_authorization_investigation_is_scoped_to_authorization(tmp_path: Path):
     assert result.target == "fixture@pinned"
     assert result.status in {"HYPOTHESES_READY", "NO_AUTH_HYPOTHESIS"}
     assert all(item.invariant_id == "INV-AUTH-001" for item in result.hypotheses)
-    assert {item.hypothesis_id for item in result.hypotheses} <= {"H-AUTH-setOperator"}
+    assert all(item.display_label == "H-AUTH-setOperator" for item in result.hypotheses)
     assert len(result.experiments) == len(result.hypotheses)
 
 
@@ -70,7 +70,7 @@ def test_payable_state_and_helper_mediated_writer_are_modeled(tmp_path: Path):
         and effect.via_function == "_writeTreasury"
         for effect in result.derived_effects
     )
-    assert any(item.hypothesis_id == "H-AUTH-setTreasury" for item in result.hypotheses)
+    assert any(item.display_label == "H-AUTH-setTreasury" for item in result.hypotheses)
 
 
 def test_library_mutator_on_qualified_storage_variable_is_modeled(tmp_path: Path):
@@ -96,7 +96,7 @@ def test_library_mutator_on_qualified_storage_variable_is_modeled(tmp_path: Path
 
     assert "_gateways" in contract.state_variables
     assert "_gateways" in functions["addGateway"].writes
-    assert any(item.hypothesis_id == "H-AUTH-addGateway" for item in result.hypotheses)
+    assert any(item.display_label == "H-AUTH-addGateway" for item in result.hypotheses)
 
 
 
@@ -138,7 +138,7 @@ def test_inherited_modifier_counts_only_when_override_calls_super(tmp_path: Path
         encoding="utf-8",
     )
     hypotheses = generate_access_control_hypotheses(contract)
-    assert {item.hypothesis_id for item in hypotheses} == {"H-AUTH-setTreasury"}
+    assert {item.display_label for item in hypotheses} == {"H-AUTH-setTreasury"}
 
 
 def test_lifecycle_write_emits_blocked_seed_even_without_supported_hypothesis(tmp_path: Path):
@@ -253,3 +253,21 @@ def test_modifier_restrictions_are_classified_structurally(tmp_path: Path):
     assert qux_seed.status == "blocked"
     assert "initialization_state" in qux_seed.preconditions_needed
     assert "qux" not in {item.target_function for item in result.hypotheses}
+
+
+def test_identical_function_names_have_distinct_source_identity_and_seed_binding(tmp_path: Path):
+    source = tmp_path / "Twin.sol"
+    source.write_text(
+        "pragma solidity ^0.8.20;\n"
+        "contract ContractA { address public slasher; function setSlasher(address next) external { slasher = next; } }\n"
+        "contract ContractB { address public slasher; function setSlasher(address next) external { slasher = next; } }\n",
+        encoding="utf-8",
+    )
+    result = investigate_authorization(source)
+    matches = [item for item in result.hypotheses if item.target_function == "setSlasher"]
+    assert len(matches) == 2
+    assert len({item.hypothesis_id for item in matches}) == 2
+    assert {item.declaring_contract for item in matches} == {"ContractA", "ContractB"}
+    assert all(item.source_path == str(source.resolve()) for item in matches)
+    assert all(item.source_line is not None and item.originating_seed_id for item in matches)
+    assert {item["declaring_contract"] for item in result.outcome_records if item["outcome"] == "hypothesis" and item["function_name"] == "setSlasher"} == {"ContractA", "ContractB"}

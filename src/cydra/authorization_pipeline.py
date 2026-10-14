@@ -31,6 +31,7 @@ class AuthorizationInvestigation:
     status: str
     derived_effects: tuple[DerivedWriteEvidence, ...] = ()
     seeds: tuple[HypothesisSeed, ...] = ()
+    outcome_records: tuple[dict[str, object], ...] = ()
 
 
 _FUNCTION_RE = re.compile(r"\bfunction\s+(?P<name>[A-Za-z_]\w*)\s*\(")
@@ -147,28 +148,120 @@ def investigate_authorization(
         modeled.append(enriched)
         derived.extend(effects)
 
-    # Seeds are a separate pre-proof artifact; do not derive their existence from
-    # whether the narrower exploit-candidate filter emits a hypothesis.
+    # Derive one explicit outcome per seed, bound by the full source identity tuple.
     seeds = generate_hypothesis_seeds(tuple(modeled))
 
     hypotheses: list[Hypothesis] = []
     for contract in modeled:
-        # Promote only independently generated, testable state-write seeds. Blocked
-        # lifecycle/unresolved-path seeds remain blocked; authority getter support is
-        # intentionally not a conversion precondition.
         seeded_state_changers = tuple(
-            seed.target_function for seed in seeds
+            seed.target_function
+            for seed in seeds
             if seed.target_contract == contract.name
+            and str(Path(seed.source).resolve()) == str(Path(contract.source).resolve())
             and seed.status == "seed"
             and bool(seed.observed_writes)
         )
         hypotheses.extend(
             generate_access_control_hypotheses(
-                contract, semantic_evidence, seeded_state_changers=seeded_state_changers
+                contract,
+                semantic_evidence,
+                seeded_state_changers=seeded_state_changers,
             )
         )
-    unique = {item.hypothesis_id: item for item in hypotheses}
-    ordered = tuple(unique[key] for key in sorted(unique))
+
+    proposed = tuple(hypotheses)
+
+    def hypothesis_identity(item):
+        return (
+            str(Path(item.source_path or "").resolve()),
+            item.declaring_contract,
+            item.target_function,
+            item.source_line,
+        )
+
+    by_identity = {}
+    for item in proposed:
+        identity = hypothesis_identity(item)
+        if identity in by_identity:
+            raise ValueError(
+                f"Ambiguous hypothesis source identity: {identity!r}"
+            )
+        by_identity[identity] = item
+
+    outcomes: list[dict[str, object]] = []
+    linked: list[Hypothesis] = []
+
+    for seed in seeds:
+        identity = (
+            str(Path(seed.source).resolve()),
+            seed.target_contract,
+            seed.target_function,
+            seed.source_line,
+        )
+
+        hypothesis = by_identity.get(identity)
+
+        if hypothesis is not None:
+            hypothesis = replace(
+                hypothesis,
+                originating_seed_id=seed.seed_id,
+            )
+            linked.append(hypothesis)
+            outcomes.append({
+                "seed_id": seed.seed_id,
+                "source_path": identity[0],
+                "declaring_contract": identity[1],
+                "function_name": identity[2],
+                "source_line": identity[3],
+                "outcome": "hypothesis",
+                "hypothesis_id": hypothesis.hypothesis_id,
+                "originating_seed_id": seed.seed_id,
+            })
+            continue
+
+        contract = next(
+            (
+                item for item in modeled
+                if item.name == seed.target_contract
+                and str(Path(item.source).resolve()) == identity[0]
+            ),
+            None,
+        )
+
+        function = next(
+            (
+                item for item in contract.functions
+                if item.name == seed.target_function
+                and item.line == seed.source_line
+            ),
+            None,
+        ) if contract else None
+
+        if (
+            seed.status == "blocked"
+            and seed.target_function.lower().startswith(
+                ("initialize", "initialise", "init")
+            )
+        ):
+            reason = "blocked:lifecycle"
+        elif function is None or function.visibility not in {"public", "external"}:
+            reason = "rejected:not-authorized-surface"
+        elif function.modifiers:
+            reason = "filtered:modifier-review-required"
+        else:
+            reason = "candidate-mismatch"
+
+        outcomes.append({
+            "seed_id": seed.seed_id,
+            "source_path": identity[0],
+            "declaring_contract": identity[1],
+            "function_name": identity[2],
+            "source_line": identity[3],
+            "outcome": "non_transition",
+            "reason_code": reason,
+        })
+
+    ordered = tuple(sorted(linked, key=lambda item: item.hypothesis_id))
     experiments = tuple(plan_access_control_experiment(item) for item in ordered)
     invariant = (Invariant(
         "INV-AUTH-001",
@@ -185,4 +278,5 @@ def investigate_authorization(
         status="HYPOTHESES_READY" if ordered else "NO_AUTH_HYPOTHESIS",
         derived_effects=tuple(derived),
         seeds=seeds,
+        outcome_records=tuple(outcomes),
     )
