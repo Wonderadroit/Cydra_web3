@@ -239,12 +239,12 @@ def generate_blind_authorization_test_from_experiment(
     # permissionless state updates. The inference is recorded explicitly; it is not
     # applied to arbitrary state changes or newly-created mapping keys.
     target_is_guarded = bool(re.search(
-        rf"\\bfunction\\s+{re.escape(function.name)}\\s*\\([^)]*\\)[^{{;]*\\bonlyOwner\\b",
+        rf"\bfunction\s+{re.escape(function.name)}\s*\([^)]*\)[^{;]*\bonlyOwner\b",
         source_text,
         re.DOTALL,
     ))
     guarded_configuration_sibling = bool(re.search(
-        r"\\bfunction\\s+set[A-Za-z0-9_$]*\\s*\\([^)]*\\)[^{{;]*\\bonlyOwner\\b[^{{;]*\\{",
+        r"\bfunction\s+set[A-Za-z0-9_$]*\s*\([^)]*\)[^{;]*\bonlyOwner\b[^{{;]*\{",
         source_text,
         re.DOTALL,
     ))
@@ -281,13 +281,13 @@ def generate_blind_authorization_test_from_experiment(
         "    bool public observedStateExistedBefore;",
         "    bool public observedAuthorityModelGovernsState;",
         "    bool public observedStateChanged;",
+        "    bool public stateReadBeforeSucceeded;",
+        "    bool public stateReadAfterSucceeded;",
     ]
     if state_getter:
         observation_declarations += [
             f"    {state_type} public observedStateBefore;",
             f"    {state_type} public observedStateAfter;",
-            "    bool public stateReadBeforeSucceeded;",
-            "    bool public stateReadAfterSucceeded;",
         ]
     before_observation = """        observedCaller = address(attacker);
         (bool ownerBeforeOk, bytes memory ownerBeforeData) = address(target).staticcall(abi.encodeWithSignature("owner()"));
@@ -325,7 +325,13 @@ def generate_blind_authorization_test_from_experiment(
             verdict = Verdict.Rejected;
             verdictReason = "caller_authorized";
         }} else if (!ok) {{
-            if (observedOwnerBefore != observedOwnerAfter) {{
+            if ({str(false).lower()} && observedOwnerBefore != observedOwnerAfter) {{
+                verdict = Verdict.Inconclusive;
+                verdictReason = "authority_changed_during_reverted_call";
+            }} else if ({str(false).lower()}) {{
+                verdict = Verdict.Rejected;
+                verdictReason = "guarded_function_reverted";
+            }} else if (observedOwnerBefore != observedOwnerAfter) {{
                 verdict = Verdict.Inconclusive;
                 verdictReason = "authority_changed_during_reverted_call";
             }} else if (bytes(expectedGuard).length != 0 && keccak256(bytes(_revertReason(returnData))) == keccak256(bytes(expectedGuard))) {{
