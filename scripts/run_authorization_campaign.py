@@ -237,14 +237,20 @@ def _seed_diagnostic(function, contract, seeds):
         }
 
     provenance = " ".join(seed.provenance)
-    if function.body_scope == "out_of_scope" or "inherited_body_out_of_scope:" in provenance:
-        reason = "inherited_body_out_of_scope"
-    elif "source_body_unavailable:" in provenance:
+    if "blocked:signature_authorization_unsupported" in provenance:
+        reason = "signature_authorization_unsupported"
+    elif "blocked:delegatecall_storage_context_unmodeled" in provenance:
+        reason = "delegatecall_storage_context_unmodeled"
+    elif "blocked:internal_overload_ambiguous" in provenance:
+        reason = "internal_overload_ambiguous"
+    elif "blocked:low_level_call_target_unresolved" in provenance:
+        reason = "low_level_call_target_unresolved"
+    elif "blocked:callee_body_out_of_scope" in provenance or function.body_scope == "out_of_scope":
+        reason = "callee_body_out_of_scope"
+    elif "blocked:source_body_unavailable" in provenance:
         reason = "source_body_unavailable"
-    elif "callee_effect_or_authorization_unclassified" in provenance:
-        reason = "unresolved_callee_effects"
-    elif "cross_contract_or_low_level_effect_unresolved" in provenance:
-        reason = "unresolved_external_effects"
+    elif "blocked:" in provenance:
+        reason = next((part.split("blocked:", 1)[1].split()[0] for part in provenance.split() if "blocked:" in part), "blocked_preconditions_unresolved")
     else:
         reason = "blocked_preconditions_unresolved"
 
