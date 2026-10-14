@@ -301,6 +301,21 @@ def generate_blind_authorization_test_from_experiment(
     else:
         verdict_logic = f'        verdict = Verdict.Unmeasurable; verdictReason = "{ownable_reason}";'
 
+    observation_logging = ""
+    if state_getter:
+        if state_type == "bool":
+            state_log_type, state_before_value, state_after_value = "bool", "observedStateBefore", "observedStateAfter"
+        elif state_type.startswith(("uint", "int")):
+            state_log_type, state_before_value, state_after_value = "uint256", "uint256(observedStateBefore)", "uint256(observedStateAfter)"
+        else:
+            state_log_type, state_before_value, state_after_value = "address", "observedStateBefore", "observedStateAfter"
+        observation_logging = (
+            f'        (bool stateBeforeLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,{state_log_type})", "CYDRA_OBS_STATE_BEFORE", {state_before_value}));\\n'
+            f'        stateBeforeLogged;\\n'
+            f'        (bool stateAfterLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,{state_log_type})", "CYDRA_OBS_STATE_AFTER", {state_after_value}));\\n'
+            f'        stateAfterLogged;'
+        )
+
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     pragma = contract_model.pragma or "^0.8.20"
@@ -347,7 +362,7 @@ contract CydraBlindAuthorizationTest {{
         ownerBeforeLogged;
         (bool ownerAfterLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,address)", "CYDRA_OBS_OWNER_AFTER", observedOwnerAfter));
         ownerAfterLogged;
-        if (state_getter) {}
+{observation_logging}
     }}
 
     function _revertReason(bytes memory data) internal pure returns (string memory) {{
