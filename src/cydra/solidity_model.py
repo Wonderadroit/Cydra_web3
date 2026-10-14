@@ -565,6 +565,32 @@ def _inherited_functions(
     return tuple(deduped)
 
 
+
+def _effective_callable_surface(
+    declared: tuple[FunctionModel, ...],
+    inherited: tuple[FunctionModel, ...],
+) -> tuple[FunctionModel, ...]:
+    """Add inherited public/external declarations without losing their source identity.
+
+    Direct declarations stay first and therefore win over inherited declarations
+    with the same Solidity signature. Inherited internal/private functions remain
+    context only and cannot become attacker-callable candidates.
+    """
+    result = list(declared)
+    seen_signatures = {
+        (item.name, tuple(parameter.type for parameter in item.parameters))
+        for item in declared
+    }
+    for item in inherited:
+        if item.visibility not in {"public", "external"}:
+            continue
+        signature = (item.name, tuple(parameter.type for parameter in item.parameters))
+        if signature in seen_signatures:
+            continue
+        seen_signatures.add(signature)
+        result.append(replace(item, body_scope="out_of_scope"))
+    return tuple(result)
+
 def _inherited_state_variables(
     root: Path,
     importer: Path,
@@ -729,18 +755,20 @@ def parse_solidity(path: str | Path, *, include_inherited: bool = True) -> tuple
                 )
             )
 
+        inherited_functions = _inherited_functions(root, path, inherits) if include_inherited else ()
+        effective_functions = _effective_callable_surface(tuple(functions), inherited_functions)
         contracts.append(
             ContractModel(
                 name=contract_name,
                 source=str(path),
-                functions=tuple(functions),
+                functions=effective_functions,
                 constructor=constructor,
                 pragma=pragma,
                 state_variables=state_variables,
                 inherits=inherits,
                 declared_types=declared_types,
                 inherited_resolved_interfaces=tuple(inherited_resolved_interfaces),
-                inherited_functions=_inherited_functions(root, path, inherits) if include_inherited else (),
+                inherited_functions=inherited_functions,
             )
         )
 
