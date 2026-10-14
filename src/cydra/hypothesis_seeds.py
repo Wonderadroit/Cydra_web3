@@ -42,29 +42,6 @@ def _is_lifecycle_surface(function: FunctionModel) -> bool:
     )
 
 
-def _function_body(function: FunctionModel, contract: ContractModel) -> str | None:
-    try:
-        source = Path(function.source or contract.source).read_text(encoding="utf-8")
-    except (OSError, UnicodeError):
-        return None
-    pattern = re.compile(
-        r"\bfunction\s+" + re.escape(function.name) + r"\s*\([^)]*\)[^{;]*\{",
-        re.MULTILINE,
-    )
-    match = pattern.search(source)
-    if not match:
-        return None
-    depth = 1
-    end = match.end()
-    while end < len(source) and depth:
-        if source[end] == "{":
-            depth += 1
-        elif source[end] == "}":
-            depth -= 1
-        end += 1
-    return source[match.end():end - 1] if depth == 0 else None
-
-
 def _observed_writes(contract: ContractModel, function: FunctionModel) -> tuple[str, ...]:
     if function.writes:
         return tuple(function.writes)
