@@ -531,6 +531,7 @@ def _inherited_functions(
     importer: Path,
     inherits: tuple[str, ...],
     seen: set[Path] | None = None,
+    compiler_closure: frozenset[str] | None = None,
 ) -> tuple[FunctionModel, ...]:
     """Resolve concrete inherited functions through the source inheritance graph."""
     seen = set() if seen is None else seen
@@ -553,15 +554,17 @@ def _inherited_functions(
             continue
         # Keep inherited declarations as context, but do not imply their bodies
         # have been analyzed in the selected target-source scope.
-        functions.extend(replace(function, body_scope="out_of_scope") for function in base.functions)
-        functions.extend(_inherited_functions(root, resolved_path, base.inherits, seen))
+        declaring_file = resolved_path.relative_to(root.resolve()).as_posix()
+        scope = "in_scope" if compiler_closure is not None and declaring_file in compiler_closure else "out_of_scope"
+        functions.extend(replace(function, declaring_contract=base.name, body_scope=scope) for function in base.functions)
+        functions.extend(_inherited_functions(root, resolved_path, base.inherits, seen, compiler_closure))
     deduped: list[FunctionModel] = []
     seen_keys: set[tuple[str, int, str]] = set()
     for function in functions:
         key = (function.name, function.line, function.visibility)
         if key not in seen_keys:
             seen_keys.add(key)
-            deduped.append(replace(function, body_scope="out_of_scope"))
+            deduped.append(function)
     return tuple(deduped)
 
 
@@ -598,7 +601,7 @@ def _inherited_state_variables(
                 variables.append(name)
     return tuple(variables)
 
-def parse_solidity(path: str | Path, *, include_inherited: bool = True) -> tuple[ContractModel, ...]:
+def parse_solidity(path: str | Path, *, include_inherited: bool = True, compiler_closure: tuple[str, ...] | frozenset[str] | None = None) -> tuple[ContractModel, ...]:
     """Minimal deterministic model extractor used before compiler integration.
 
     It intentionally extracts only syntactic facts needed by the current
@@ -726,6 +729,7 @@ def parse_solidity(path: str | Path, *, include_inherited: bool = True) -> tuple
                     execution_value_bindings=_execution_value_bindings(body),
                     return_expressions=_return_expressions(body),
                     source=str(path.resolve()),
+                    declaring_contract=contract_name,
                 )
             )
 
@@ -740,7 +744,7 @@ def parse_solidity(path: str | Path, *, include_inherited: bool = True) -> tuple
                 inherits=inherits,
                 declared_types=declared_types,
                 inherited_resolved_interfaces=tuple(inherited_resolved_interfaces),
-                inherited_functions=_inherited_functions(root, path, inherits) if include_inherited else (),
+                inherited_functions=_inherited_functions(root, path, inherits, compiler_closure=frozenset(compiler_closure) if compiler_closure is not None else None) if include_inherited else (),
             )
         )
 
