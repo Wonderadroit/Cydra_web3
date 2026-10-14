@@ -41,6 +41,8 @@ jobs:
             --target-ref "3bda07a47858031165f28393dffb4a72aa861e56" \
             --target-path "src/chains/Mainnet/TakerSubmitted.sol" \
             --target-project "."
+      - name: Run regression suite (including inherited callable surface fixture)
+        run: python -m pytest
       - name: Run blind authorization campaign
         env:
           PYTHONPATH: src
@@ -52,7 +54,6 @@ jobs:
             --target-path "src/chains/Mainnet/TakerSubmitted.sol" \
             --target-project "." \
             --mode blind \
-            --require-ready \
             --output "$RUNNER_TEMP/authorization-campaign.json" \
             2>&1 | tee "$RUNNER_TEMP/authorization-campaign.log"
       - name: Upload blind campaign evidence
