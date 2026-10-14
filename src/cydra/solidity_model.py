@@ -751,6 +751,7 @@ def parse_solidity(path: str | Path, *, include_inherited: bool = True) -> tuple
                     execution_value_bindings=_execution_value_bindings(body),
                     return_expressions=_return_expressions(body),
                     source=str(path.resolve()),
+                    declaring_contract=contract_name,
                 )
             )
 
