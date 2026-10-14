@@ -69,6 +69,8 @@ class FunctionModel:
     return_expressions: tuple[str, ...] = field(default_factory=tuple)
     # Absolute source path when known; inherited function models retain their declaring file.
     source: str | None = None
+    # Contract that declares this function; inherited surfaces must not be relabeled as the child.
+    declaring_contract: str | None = None
     # Inherited declarations may be visible to the model while their bodies remain outside this analysis scope.
     body_scope: Literal["in_scope", "out_of_scope"] = "in_scope"
 
