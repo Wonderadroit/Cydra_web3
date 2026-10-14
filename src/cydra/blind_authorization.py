@@ -441,6 +441,19 @@ contract CydraBlindAuthorizationTest {{
         return type({target_type}).creationCode;
     }}
 
+    function _recordStateMetadata(address consoleAddress) internal {{
+        (bool stateNameLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,string)", "CYDRA_OBS_STATE_VARIABLE", observedStateVariable));
+        stateNameLogged;
+        (bool stateDeclaredLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_STATE_VARIABLE_DECLARED", observedStateVariableDeclared));
+        stateDeclaredLogged;
+        (bool stateExistsLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_STATE_EXISTED_BEFORE", observedStateExistedBefore));
+        stateExistsLogged;
+        (bool stateExistenceMeasuredLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_STATE_EXISTENCE_MEASURED", observedStateExistenceMeasured));
+        stateExistenceMeasuredLogged;
+        (bool stateMeasurementAvailableLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_STATE_MEASUREMENT_AVAILABLE", stateMeasurementAvailable));
+        stateMeasurementAvailableLogged;
+    }}
+
     function _recordVerdict() internal {{
         address consoleAddress = address(uint160(0x00000000000000000000636f6e736f6c652e6c6f67));
         (bool logged,) = consoleAddress.staticcall(
@@ -461,16 +474,7 @@ contract CydraBlindAuthorizationTest {{
         ownerBeforeOkLogged;
         (bool ownerAfterOkLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_OWNER_AFTER_READ_OK", ownerReadAfterSucceeded));
         ownerAfterOkLogged;
-        (bool stateNameLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,string)", "CYDRA_OBS_STATE_VARIABLE", observedStateVariable));
-        stateNameLogged;
-        (bool stateDeclaredLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_STATE_VARIABLE_DECLARED", observedStateVariableDeclared));
-        stateDeclaredLogged;
-        (bool stateExistsLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_STATE_EXISTED_BEFORE", observedStateExistedBefore));
-        stateExistsLogged;
-        (bool stateExistenceMeasuredLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_STATE_EXISTENCE_MEASURED", observedStateExistenceMeasured));
-        stateExistenceMeasuredLogged;
-        (bool stateMeasurementAvailableLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_STATE_MEASUREMENT_AVAILABLE", stateMeasurementAvailable));
-        stateMeasurementAvailableLogged;
+        _recordStateMetadata(consoleAddress);
         (bool stateGovernedLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_AUTHORITY_MODEL_GOVERNS_STATE", observedAuthorityModelGovernsState));
         stateGovernedLogged;
         (bool stateChangedLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_STATE_CHANGED", observedStateChanged));
