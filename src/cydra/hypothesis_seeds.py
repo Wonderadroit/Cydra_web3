@@ -276,17 +276,6 @@ def generate_hypothesis_seeds(contracts: tuple[ContractModel, ...] | list[Contra
                     "initialization state is unknown",
                     "intended privileged actor must be established from target evidence",
                 )
-            elif observed_writes:
-                writes = ", ".join(observed_writes)
-                question = f"Can a caller outside the intended trust boundary change {writes} through {function.name}?"
-                invariant = f"Only an actor authorized by the evidenced trust boundary may change security-relevant state ({writes})."
-                invariant_source = "derived"
-                prerequisites = ("deployment_or_local_fork", "intended_authorization_boundary", "control_actor_setup")
-                status = "seed"
-                uncertainty = (
-                    "source-level writes do not establish runtime reachability",
-                    "effective inherited/helper guards require validation",
-                )
             elif unresolved:
                 question = (
                     f"Can a caller outside the evidenced trust boundary trigger security-relevant "
@@ -299,6 +288,17 @@ def generate_hypothesis_seeds(contracts: tuple[ContractModel, ...] | list[Contra
                 uncertainty = (
                     "the bounded call walk reached an explicit unsupported or unresolved boundary",
                     "no target-specific authorization semantics are assumed",
+                )
+            elif observed_writes:
+                writes = ", ".join(observed_writes)
+                question = f"Can a caller outside the intended trust boundary change {writes} through {function.name}?"
+                invariant = f"Only an actor authorized by the evidenced trust boundary may change security-relevant state ({writes})."
+                invariant_source = "derived"
+                prerequisites = ("deployment_or_local_fork", "intended_authorization_boundary", "control_actor_setup")
+                status = "seed"
+                uncertainty = (
+                    "source-level writes do not establish runtime reachability",
+                    "effective inherited/helper guards require validation",
                 )
             else:
                 question = (
