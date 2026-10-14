@@ -318,6 +318,8 @@ def generate_blind_authorization_test_from_experiment(
             f'        stateAfterLogged;'
         )
 
+    observation_declarations = "\\n".join(observation_declarations)
+
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     pragma = contract_model.pragma or "^0.8.20"
