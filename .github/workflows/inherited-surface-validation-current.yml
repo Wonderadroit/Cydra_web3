@@ -1,0 +1,67 @@
+name: Inherited Surface Validation — Current Causal-Control Stack
+
+on:
+  push:
+    branches:
+      - "fix/inherited-callable-surface-current"
+
+permissions:
+  contents: read
+
+jobs:
+  validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: foundry-rs/foundry-toolchain@v1
+      - run: python -m pip install --upgrade pip pytest
+      - run: python -m pip install -e .
+      - name: Run complete regression suite including inherited surface tests
+        run: python -m pytest
+      - name: Execute all three existing generated verdict fixtures
+        env:
+          PYTHONPATH: src
+        run: python scripts/run_state_control_verdict_fixtures.py
+      - name: Re-run DcntEth causal positive control
+        env:
+          PYTHONPATH: src
+        run: |
+          set -o pipefail
+          python scripts/run_authorization_campaign.py \
+            --target-repo https://github.com/decentxyz/decent-bridge.git \
+            --target-ref 7f90fd4489551b69c20d11eeecb17a3f564afb18 \
+            --target-path src/DcntEth.sol \
+            --target-project . \
+            --require-ready \
+            --output "$RUNNER_TEMP/authorization-positive-control.json" \
+            2>&1 | tee "$RUNNER_TEMP/authorization-positive-control.log"
+      - name: Run pinned 0x concrete campaign at measurement gate
+        env:
+          PYTHONPATH: src
+        run: |
+          set -o pipefail
+          python scripts/run_authorization_campaign.py \
+            --target-repo https://github.com/0xProject/0x-settler.git \
+            --target-ref 3bda07a47858031165f28393dffb4a72aa861e56 \
+            --target-path src/chains/Mainnet/TakerSubmitted.sol \
+            --target-project . \
+            --mode blind \
+            --allow-no-hypothesis \
+            --output "$RUNNER_TEMP/0x-authorization-campaign.json" \
+            2>&1 | tee "$RUNNER_TEMP/0x-authorization-campaign.log"
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cydra-inherited-surface-validation-current
+          path: |
+            ${{ runner.temp }}/authorization-positive-control.json
+            ${{ runner.temp }}/authorization-positive-control.log
+            ${{ runner.temp }}/0x-authorization-campaign.json
+            ${{ runner.temp }}/0x-authorization-campaign.log
+          if-no-files-found: warn
+          retention-days: 14
