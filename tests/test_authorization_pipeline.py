@@ -193,9 +193,9 @@ def test_seed_generator_keeps_protected_state_writer_as_question(tmp_path: Path)
 def test_identical_function_names_have_distinct_source_identity_and_seed_binding(tmp_path: Path):
     source = tmp_path / "Twin.sol"
     source.write_text(
-        "pragma solidity ^0.8.20;\\n"
-        "contract ContractA { address public slasher; function setSlasher(address next) external { slasher = next; } }\\n"
-        "contract ContractB { address public slasher; function setSlasher(address next) external { slasher = next; } }\\n",
+        "pragma solidity ^0.8.20;\n"
+        "contract ContractA { address public slasher; function setSlasher(address next) external { slasher = next; } }\n"
+        "contract ContractB { address public slasher; function setSlasher(address next) external { slasher = next; } }\n",
         encoding="utf-8",
     )
     result = investigate_authorization(source)
