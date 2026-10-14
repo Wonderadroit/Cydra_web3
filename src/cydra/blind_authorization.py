@@ -1,4 +1,4 @@
-verdict_logic = '        verdict = Verdict.Unmeasurable; verdictReason = "{ownable_reason}";'
+verdict_logic = f'        verdict = Verdict.Unmeasurable; verdictReason = "{ownable_reason}";'
 
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
