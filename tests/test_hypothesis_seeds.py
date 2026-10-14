@@ -120,3 +120,63 @@ def test_read_only_balanceof_does_not_become_authorization_hypothesis(tmp_path: 
     )
     contract = parse_solidity(source)[0]
     assert not generate_access_control_hypotheses(contract)
+
+def test_inherited_functions_are_evaluated_once_with_nearest_declaration_precedence(tmp_path: Path):
+    child_source = tmp_path / "Child.sol"
+    parent_source = tmp_path / "Parent.sol"
+    grandparent_source = tmp_path / "Grandparent.sol"
+    child_source.write_text(
+        "contract Child { function setValue(uint256 next) external { value = next; } }",
+        encoding="utf-8",
+    )
+    parent_source.write_text(
+        "contract Parent { function execute() public { externalEffect(); } "
+        "function balanceOf(address) external view returns (uint256) { return 0; } }",
+        encoding="utf-8",
+    )
+    grandparent_source.write_text(
+        "contract Grandparent { function balanceOf(address) external view returns (uint256) { return 1; } }",
+        encoding="utf-8",
+    )
+    child_override = FunctionModel(
+        "setValue", "external", (), ("value",), (), 1,
+        parameters=(), source=str(child_source), declaring_contract="Child",
+    )
+    parent_execute = FunctionModel(
+        "execute", "public", (), (), (), 2,
+        source=str(parent_source), declaring_contract="Parent",
+    )
+    parent_balance = FunctionModel(
+        "balanceOf", "external", (), (), (), 3,
+        parameters=(), source=str(parent_source), declaring_contract="Parent",
+    )
+    grandparent_balance = FunctionModel(
+        "balanceOf", "external", (), (), (), 4,
+        parameters=(), source=str(grandparent_source), declaring_contract="Grandparent",
+    )
+    contract = ContractModel(
+        "Child", str(child_source), (child_override,),
+        state_variables=("value",),
+        inherited_functions=(parent_execute, parent_balance, grandparent_balance),
+    )
+    seeds = generate_hypothesis_seeds((contract,))
+    assert [seed.target_function for seed in seeds].count("execute") == 1
+    assert not any(seed.target_function == "balanceOf" for seed in seeds)
+    assert all(seed.source != str(grandparent_source) for seed in seeds)
+
+
+def test_inherited_public_effect_path_is_evaluated_not_not_evaluated(tmp_path: Path):
+    source = tmp_path / "Base.sol"
+    source.write_text(
+        "contract Base { function execute() public { externalEffect(); } }",
+        encoding="utf-8",
+    )
+    inherited = FunctionModel(
+        "execute", "public", (), (), (), 1, source=str(source),
+        declaring_contract="Base", body_scope="in_scope",
+    )
+    contract = ContractModel("Child", str(source), (), inherited_functions=(inherited,))
+    seeds = generate_hypothesis_seeds((contract,))
+    assert len(seeds) == 1
+    assert seeds[0].target_function == "execute"
+    assert seeds[0].status == "blocked"
