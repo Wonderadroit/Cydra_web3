@@ -94,6 +94,10 @@ def test_transfer_guard_factory_fresh_registry_key_is_not_supported(tmp_path: Pa
         tmp_path,
     )
     assert 'verdict = Verdict.Unmeasurable; verdictReason = "no_authority_getter";' in generated
+    assert 'observedStateVariable = "_isTransferGuard";' in generated
+    assert "observedStateVariableDeclared = true;" in generated
     assert "observedStateExistedBefore = false;" in generated
+    assert "observedStateExistenceMeasured = true;" in generated
+    assert "stateMeasurementAvailable = false;" in generated
     assert "observedAuthorityModelGovernsState = false;" in generated
     assert 'verdictReason = "unauthorized_preexisting_authority_governed_state_changed";' not in generated
