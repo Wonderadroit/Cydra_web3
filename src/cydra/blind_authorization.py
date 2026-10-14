@@ -227,11 +227,11 @@ def generate_blind_authorization_test_from_experiment(
     # recover only a source-declared public scalar that the selected function assigns.
     if state_getter is None:
         for match in re.finditer(
-            r"\\b(address(?:\\s+payable)?|bool|uint\\d*|int\\d*)\\s+public\\s+(\\w+)\\s*;",
+            r"\b(address(?:\s+payable)?|bool|uint\d*|int\d*)\s+public\s+(\w+)\s*;",
             source_text,
         ):
             candidate_type, candidate_name = match.group(1).strip(), match.group(2)
-            if re.search(rf"\\b{re.escape(candidate_name)}\\s*=", source_text):
+            if re.search(rf"\b{re.escape(candidate_name)}\s*=", source_text):
                 state_type, state_getter = candidate_type, candidate_name
                 break
 
@@ -310,9 +310,9 @@ def generate_blind_authorization_test_from_experiment(
         else:
             state_log_type, state_before_value, state_after_value = "address", "observedStateBefore", "observedStateAfter"
         observation_logging = (
-            f'        (bool stateBeforeLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,{state_log_type})", "CYDRA_OBS_STATE_BEFORE", {state_before_value}));\\n'
-            f'        stateBeforeLogged;\\n'
-            f'        (bool stateAfterLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,{state_log_type})", "CYDRA_OBS_STATE_AFTER", {state_after_value}));\\n'
+            f'        (bool stateBeforeLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,{state_log_type})", "CYDRA_OBS_STATE_BEFORE", {state_before_value}));\n'
+            f'        stateBeforeLogged;\n'
+            f'        (bool stateAfterLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,{state_log_type})", "CYDRA_OBS_STATE_AFTER", {state_after_value}));\n'
             f'        stateAfterLogged;'
         )
 
@@ -362,6 +362,10 @@ contract CydraBlindAuthorizationTest {{
         ownerBeforeLogged;
         (bool ownerAfterLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,address)", "CYDRA_OBS_OWNER_AFTER", observedOwnerAfter));
         ownerAfterLogged;
+        (bool ownerBeforeOkLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_OWNER_BEFORE_READ_OK", ownerReadBeforeSucceeded));
+        ownerBeforeOkLogged;
+        (bool ownerAfterOkLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_OWNER_AFTER_READ_OK", ownerReadAfterSucceeded));
+        ownerAfterOkLogged;
 {observation_logging}
     }}
 
