@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - "campaign/authorization-positive-control-*"
+      - "fix/compiler-closure-inherited-scope"
   workflow_dispatch:
 
 permissions:
