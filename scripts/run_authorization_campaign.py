@@ -234,7 +234,54 @@ def _json(v):
     return v
 
 
-def _no_hypothesis_payload(target, compiler, result, related_intent_parity_hypotheses=()):
+def _callable_function_diagnostics(contracts, seeds, compiler_closure, checkout_root):
+    """Record discovery, exact closure membership, and whether seed generation evaluated each callable."""
+    closure = {str(item).replace("\\", "/").lstrip("./") for item in compiler_closure}
+    seed_keys = {
+        (str(Path(seed.source).resolve()), seed.target_contract, seed.target_function, seed.source_line)
+        for seed in seeds
+    }
+    diagnostics = []
+    seen = set()
+    for contract in contracts:
+        surfaces = [(function, False) for function in contract.functions]
+        surfaces.extend((function, True) for function in contract.inherited_functions)
+        for function, inherited in surfaces:
+            if function.visibility not in {"public", "external"}:
+                continue
+            source = str(Path(function.source or contract.source).resolve())
+            try:
+                declaring_file = Path(source).relative_to(checkout_root.resolve()).as_posix()
+            except ValueError:
+                declaring_file = Path(source).as_posix()
+            declaring_file = declaring_file.lstrip("./")
+            key = (source, function.declaring_contract or contract.name, function.name, function.line)
+            if key in seen:
+                continue
+            seen.add(key)
+            in_closure = declaring_file in closure
+            if inherited:
+                decision = "not_evaluated:seed_generator_iterates_declared_functions_only"
+            elif key in seed_keys:
+                decision = "produced"
+            else:
+                decision = "blocked:no_observed_writes_lifecycle_or_unresolved_path"
+            diagnostics.append({
+                "contract": contract.name,
+                "declaring_contract": function.declaring_contract or contract.name,
+                "function": function.name,
+                "visibility": function.visibility,
+                "declaring_source": source,
+                "declaring_file": declaring_file,
+                "source_line": function.line,
+                "body_scope": function.body_scope,
+                "in_compiler_closure": in_closure,
+                "seed_decision": decision,
+            })
+    return diagnostics
+
+
+def _no_hypothesis_payload(target, compiler, result, checkout_root, related_intent_parity_hypotheses=()):
     """Preserve no-auth and unsupported-related-hypothesis outcomes without calling either a finding."""
     related = _json(related_intent_parity_hypotheses)
     has_related = bool(related_intent_parity_hypotheses)
@@ -300,11 +347,15 @@ def _no_hypothesis_payload(target, compiler, result, related_intent_parity_hypot
             "matched_source_count": compiler.matched_source_count,
             "source_ast_found": compiler.source_ast_found,
             "source_dependency_count": compiler.source_dependency_count,
+            "source_closure": list(compiler.source_closure),
             "unresolved_imports": list(compiler.unresolved_imports),
             "semantic_relationship_count": len(compiler.evidence),
             "parameter_constraint_count": len(compiler.constraints),
         },
         "lifecycle_surfaces": lifecycle_surfaces,
+        "callable_function_diagnostics": _callable_function_diagnostics(
+            result.contracts, getattr(result, "seeds", ()), compiler.source_closure, checkout_root
+        ),
         "contracts": [
             {
                 "name": contract.name,
@@ -458,6 +509,7 @@ def main() -> int:
                 f"{args.target_repo}@{args.target_ref}:{args.target_path}",
                 compiler,
                 result,
+                checkout,
                 related_intent_parity_hypotheses=related_intent_parity_hypotheses,
             )
             if args.output:
