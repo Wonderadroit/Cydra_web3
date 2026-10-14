@@ -9,7 +9,8 @@ def test_resolves_inherited_owner_getter_with_minimal_sibling_fixture(tmp_path: 
         """
         pragma solidity ^0.8.20;
         contract OwnableBase {
-            address public owner;
+            address internal _owner;
+            function owner() public view returns (address) { return _owner; }
             modifier onlyOwner() { require(msg.sender == owner, "owner only"); _; }
         }
         contract Target is OwnableBase {
@@ -33,7 +34,7 @@ def test_inherited_authority_walk_fails_closed_when_depth_budget_exhausted(tmp_p
     source.write_text(
         """
         pragma solidity ^0.8.20;
-        contract Base0 { address public owner; }
+        contract Base0 { function owner() public view returns (address) { return address(1); } }
         contract Base1 is Base0 {}
         contract Base2 is Base1 {}
         contract Base3 is Base2 {}
