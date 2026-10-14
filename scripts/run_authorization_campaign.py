@@ -21,6 +21,27 @@ from cydra.reasoning import (
     plan_access_control_experiment,
 )
 
+def _resolve_hypothesis_contract(result, hypothesis):
+    """Resolve by the full declaring-source identity; no name-only fallback."""
+    if not all((hypothesis.source_path, hypothesis.declaring_contract, hypothesis.source_line is not None)):
+        raise RuntimeError(f"candidate-missing: incomplete identity tuple for {hypothesis.hypothesis_id}")
+    identity = (str(Path(hypothesis.source_path).resolve()), hypothesis.declaring_contract,
+                hypothesis.target_function, hypothesis.source_line)
+    matches = [
+        contract for contract in result.contracts
+        if sum(1 for function in contract.functions
+               if function.name == identity[2]
+               and function.line == identity[3]
+               and str(Path(function.source or contract.source).resolve()) == identity[0]
+               and (function.declaring_contract or contract.name) == identity[1]) == 1
+    ]
+    if not matches:
+        raise RuntimeError(f"candidate-missing: no contract/function matches {identity!r}")
+    if len(matches) != 1:
+        raise RuntimeError(f"candidate-ambiguous: {len(matches)} contracts match {identity!r}")
+    return matches[0]
+
+
 _IMPORT_RE = re.compile(r'''\bimport\s+(?:[^\"']+\s+from\s+)?[\"']([^\"']+)[\"']\s*;''')
 
 def _seed_coverage_allows_measurement(hypotheses, seeds) -> bool:
