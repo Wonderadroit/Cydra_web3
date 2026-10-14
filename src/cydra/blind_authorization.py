@@ -94,7 +94,7 @@ def _resolve_inherited_ownable_surface(
     """Find owner() along declared contract bases; this is not a general type resolver."""
     source_file = Path(source_path).resolve()
     search_root = source_file.parent
-    for parent in source_file.parents:
+    for parent in list(source_file.parents)[:5]:
         try:
             if sum(1 for _ in parent.rglob("*.sol")) > 1:
                 search_root = parent
