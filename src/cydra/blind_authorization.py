@@ -294,7 +294,7 @@ def generate_blind_authorization_test_from_experiment(
     elif ownable_supported:
         verdict_logic = f'''        if (!ok) {{
             if (observedOwnerBefore != observedOwnerAfter) verdict = Verdict.Inconclusive;
-            else if (expectedGuard.length == 0) verdict = Verdict.Unmeasurable;
+            else if (bytes(expectedGuard).length == 0) verdict = Verdict.Unmeasurable;
             else if (keccak256(bytes(_revertReason(returnData))) == keccak256(bytes(expectedGuard))) verdict = Verdict.Rejected;
             else verdict = Verdict.Inconclusive;
         }} else if (observedOwnerBefore != address(attacker) && observedOwnerAfter == address(attacker)) verdict = Verdict.Supported;
