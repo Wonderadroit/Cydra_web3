@@ -48,6 +48,19 @@ def test_requested_candidate_selects_by_full_source_identity():
     selected = _select_hypotheses(
         (other, target),
         "middleware-sdk/lib/core/src/contracts/vault/Vault.sol::Vault::setSlasher::354",
+        target_path="middleware-sdk/lib/core/src/contracts/vault/Vault.sol",
+    )
+
+    assert selected == (target,)
+
+
+def test_short_source_filename_is_scoped_to_pinned_target_path():
+    target = _hypothesis()
+
+    selected = _select_hypotheses(
+        (target,),
+        "Vault.sol::Vault::setSlasher::354",
+        target_path="middleware-sdk/lib/core/src/contracts/vault/Vault.sol",
     )
 
     assert selected == (target,)
@@ -58,6 +71,7 @@ def test_requested_candidate_missing_fails_closed():
         _select_hypotheses(
             (_hypothesis(),),
             "middleware-sdk/lib/core/src/contracts/vault/Vault.sol::Vault::claimBatch::410",
+            target_path="middleware-sdk/lib/core/src/contracts/vault/Vault.sol",
         )
 
 
@@ -69,6 +83,7 @@ def test_duplicate_full_source_identity_fails_closed_as_ambiguous():
         _select_hypotheses(
             (duplicate_a, duplicate_b),
             "middleware-sdk/lib/core/src/contracts/vault/Vault.sol::Vault::setSlasher::354",
+            target_path="middleware-sdk/lib/core/src/contracts/vault/Vault.sol",
         )
 
 
