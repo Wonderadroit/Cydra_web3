@@ -405,3 +405,60 @@ def test_targeted_candidate_selection_excludes_other_inherited_candidates():
         target_path="src/DcntEth.sol",
     )
     assert [item.hypothesis_id for item in selected] == ["H-DIRECT"]
+
+
+def test_resolver_matches_inherited_declaration_identity_without_relabeling_child(tmp_path: Path):
+    from types import SimpleNamespace
+    from scripts.run_authorization_campaign import _resolve_hypothesis_contract
+    from cydra.models import ContractModel, FunctionModel, Hypothesis
+
+    parent = tmp_path / "Settler.sol"
+    child = tmp_path / "MainnetSettler.sol"
+    parent.write_text(
+        "pragma solidity ^0.8.20;\n"
+        "abstract contract Settler {\n"
+        "  function execute(bytes calldata) public virtual {}\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    child.write_text(
+        "pragma solidity ^0.8.20;\n"
+        "contract MainnetSettler is Settler {}\n",
+        encoding="utf-8",
+    )
+    function = FunctionModel(
+        name="execute",
+        visibility="public",
+        modifiers=(),
+        writes=(),
+        external_calls=(),
+        line=3,
+        source=str(parent.resolve()),
+        declaring_contract="Settler",
+        body_scope="out_of_scope",
+    )
+    contract = ContractModel(
+        name="MainnetSettler",
+        source=str(child.resolve()),
+        functions=(function,),
+        inherits=("Settler",),
+    )
+    hypothesis = Hypothesis(
+        hypothesis_id="H-INHERITED-EXECUTE",
+        claim="test inherited identity",
+        invariant_id="INV-AUTH-001",
+        target_function="execute",
+        attacker_capability="external caller",
+        expected_impact="test",
+        source_path=str(parent.resolve()),
+        declaring_contract="Settler",
+        source_line=3,
+    )
+
+    selected = _resolve_hypothesis_contract(
+        SimpleNamespace(contracts=(contract,)),
+        hypothesis,
+    )
+    assert selected.name == "MainnetSettler"
+    assert selected.functions[0].source == str(parent.resolve())
+    assert selected.functions[0].declaring_contract == "Settler"
