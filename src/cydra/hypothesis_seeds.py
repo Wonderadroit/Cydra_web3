@@ -199,6 +199,8 @@ def _bounded_callee_walk(
             call_text = ".".join(str(part) for part in call) if isinstance(call, (tuple, list)) else str(call)
             lowered = call_text.lower()
             if call_text and not ("permit2" in lowered or "allowanceholder" in lowered):
+                if "resolved_external_call" not in effects:
+                    effects.append("resolved_external_call")
                 provenance.append(f"resolved_external_call:{call_text}")
             if "permit2" in lowered or "allowanceholder" in lowered:
                 target = "Permit2" if "permit2" in lowered else "AllowanceHolder"
@@ -267,7 +269,12 @@ def generate_hypothesis_seeds(contracts: tuple[ContractModel, ...] | list[Contra
             observed_writes = tuple(dict.fromkeys((*direct_writes, *transitive_writes)))
             lifecycle = _is_lifecycle_surface(function)
             unresolved = (walk_blocker,) if walk_blocker else ()
-            if not observed_writes and not lifecycle and not unresolved:
+            if (
+                not observed_writes
+                and not lifecycle
+                and not unresolved
+                and not any(item.startswith("external_call:") for item in effects)
+            ):
                 # resolved_read / resolved_external_call are measurements, not
                 # evidence of a security-relevant effect and must not seed a candidate.
                 continue
