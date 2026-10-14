@@ -108,6 +108,7 @@ jobs:
             --target-ref "$TARGET_REF"
             --target-path "$TARGET_PATH"
             --target-project "$TARGET_PROJECT"
+            --mode blind
             --output "$RUNNER_TEMP/authorization-campaign.json"
           )
           if [[ "$REQUIRE_READY" == "true" ]]; then
