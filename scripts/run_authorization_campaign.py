@@ -104,19 +104,32 @@ def _parse_candidate_identity(value: str) -> tuple[str, str, str, int]:
     return source_path.replace("\\", "/"), contract, function, line
 
 
-def _select_hypotheses(hypotheses, requested_candidate: str | None):
-    """Return all hypotheses for blind mode or exactly one full-identity match."""
+def _select_hypotheses(
+    hypotheses,
+    requested_candidate: str | None,
+    *,
+    target_path: str,
+):
+    """Return all blind candidates or one identity matched within the pinned source path."""
     if requested_candidate is None:
         return tuple(hypotheses)
 
     requested_path, requested_contract, requested_function, requested_line = (
         _parse_candidate_identity(requested_candidate)
     )
+    normalized_target = target_path.replace("\\", "/").strip("/")
+    requested_path = requested_path.strip("/")
+    # The short Vault.sol spelling is safe only because the campaign separately
+    # pins target_path. It is not a global basename search across the model.
+    if "/" not in requested_path:
+        if Path(normalized_target).name != requested_path:
+            normalized_target = "__candidate_path_mismatch__"
+        requested_path = normalized_target
 
     def path_matches(candidate_path: str | None) -> bool:
         if not candidate_path:
             return False
-        normalized = str(candidate_path).replace("\\", "/")
+        normalized = str(candidate_path).replace("\\", "/").strip("/")
         requested = requested_path.rstrip("/")
         return normalized == requested or normalized.endswith("/" + requested)
 
@@ -628,7 +641,7 @@ def main() -> int:
                 "for the requested identity"
             )
         if args.requested_candidate is not None:
-            hypotheses = list(_select_hypotheses(hypotheses, args.requested_candidate))
+            hypotheses = list(\n                _select_hypotheses(\n                    hypotheses, args.requested_candidate, target_path=args.target_path\n                )\n            )
         related_intent_parity_hypotheses = [
             h for h in result.hypotheses
             if h.invariant_id.startswith("INV-INTENT-PARITY-")
