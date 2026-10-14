@@ -98,7 +98,7 @@ def test_inherited_scope_comes_only_from_compiler_closure(tmp_path: Path):
         encoding="utf-8",
     )
     child.write_text(
-        "pragma solidity ^0.8.20; import './Base.sol'; contract Child is Base {}",
+        "pragma solidity ^0.8.20; import \"./Base.sol\"; contract Child is Base {}",
         encoding="utf-8",
     )
 
