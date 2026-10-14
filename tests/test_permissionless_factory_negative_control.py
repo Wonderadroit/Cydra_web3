@@ -65,7 +65,8 @@ def test_permissionless_factory_verdict_is_unmeasurable_until_authority_is_obser
     generated = _generate(fixture, "PermissionlessFactory", "create", ("_isChild",), tmp_path)
     assert "Verdict public verdict;" in generated
     assert "verdict = Verdict.Unmeasurable;" in generated
-    assert "Verdict.Rejected" not in generated
+    assert 'verdict = Verdict.Unmeasurable; verdictReason = "no_authority_getter";' in generated
+    assert "observedAuthorityModelGovernsState = false;" in generated
     assert "emit CydraVerdict" not in generated
     assert "require(false" not in generated
     assert "if (deployedAddress == address(0))" in generated
