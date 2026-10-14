@@ -311,6 +311,13 @@ def _git(cwd: Path, *args: str) -> str:
     ).stdout.strip()
 
 
+def _observed_bool(output: str, field: str) -> bool | None:
+    match = re.search(rf"^\\s*{re.escape(field)}\\s+(true|false)\\s*$", output, re.MULTILINE | re.IGNORECASE)
+    if match is None:
+        return None
+    return match.group(1).lower() == "true"
+
+
 def _auth_modifier(source):
     """Choose an owner/admin guard for the causal patch, never a merely frequent role guard."""
     defs = {}
@@ -853,9 +860,17 @@ def main() -> int:
 
             if args.require_ready and outcome.benchmark_status == "confirmed":
                 isolated_source = execution_project / source_relative
+                # Causal-control discovery must include inherited modifiers in
+                # imported dependencies, not only first-party files under src/.
+                auth_sources = []
+                for source_root_name in ("src", "lib"):
+                    source_root = execution_project / source_root_name
+                    if source_root.is_dir():
+                        auth_sources.extend(source_root.rglob("*.sol"))
                 auth_context = "\n".join(
                     path.read_text(encoding="utf-8")
-                    for path in sorted((execution_project / "src").rglob("*.sol"))
+                    for path in sorted(set(auth_sources))
+                    if path.is_file()
                 )
                 modifier = _auth_modifier(auth_context)
                 print("AUTHORIZATION_CONTROL", modifier)
@@ -873,14 +888,19 @@ def main() -> int:
                     )
                     try:
                         patched_test = generated.with_name(generated.stem + "-patched.t.sol")
-                        _patched_auth_test(generated, patched_test)
+                        shutil.copy2(generated, patched_test)
                         patched = run_foundry_test(
                             execution_project, patched_test,
                             hypothesis.hypothesis_id + ":patched", "patched",
                         )
                     finally:
                         isolated_source.write_text(original, encoding="utf-8")
-                    causal = execution.status == "FAIL" and patched.status == "PASS"
+                    causal = (
+                        _observed_bool(execution.stdout, "CYDRA_OBS_CALL_SUCCEEDED") is True
+                        and _observed_bool(execution.stdout, "CYDRA_OBS_STATE_CHANGED") is True
+                        and _observed_bool(patched.stdout, "CYDRA_OBS_CALL_SUCCEEDED") is False
+                        and _observed_bool(patched.stdout, "CYDRA_OBS_STATE_CHANGED") is False
+                    )
                     reproduction = run_foundry_test(
                         execution_project, generated,
                         hypothesis.hypothesis_id + ":reproduction", "reproduction",
@@ -892,7 +912,7 @@ def main() -> int:
                         repro_test = generated.with_name(
                             generated.stem + "-reproduction-patched.t.sol"
                         )
-                        _patched_auth_test(generated, repro_test)
+                        shutil.copy2(generated, repro_test)
                         repro_patched = run_foundry_test(
                             execution_project, repro_test,
                             hypothesis.hypothesis_id + ":reproduction-patched",
@@ -900,7 +920,12 @@ def main() -> int:
                         )
                     finally:
                         isolated_source.write_text(original, encoding="utf-8")
-                    repro = reproduction.status == "FAIL" and repro_patched.status == "PASS"
+                    repro = (
+                        _observed_bool(reproduction.stdout, "CYDRA_OBS_CALL_SUCCEEDED") is True
+                        and _observed_bool(reproduction.stdout, "CYDRA_OBS_STATE_CHANGED") is True
+                        and _observed_bool(repro_patched.stdout, "CYDRA_OBS_CALL_SUCCEEDED") is False
+                        and _observed_bool(repro_patched.stdout, "CYDRA_OBS_STATE_CHANGED") is False
+                    )
                     print(
                         "PATCHED_EXECUTION_STATUS", patched.status,
                         "CAUSAL_VERIFICATION", causal,
