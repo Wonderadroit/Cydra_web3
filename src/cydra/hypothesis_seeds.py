@@ -166,10 +166,24 @@ def _bounded_callee_walk(
 
         for match in re.finditer(r"\bsuper\.([A-Za-z_]\w*)\s*\(", body):
             name = match.group(1)
-            candidates = [
-                candidate for candidate in by_name.get(name, [])
-                if candidate.source != source or candidate.line != item.line
-            ]
+            # Explicit super dispatch must retain overridden ancestor declarations;
+            # effective-signature deduplication is for public surfaces, not super lookup.
+            super_candidates = (*effective, *contract.inherited_functions)
+            candidates_by_declaration = {}
+            for candidate in super_candidates:
+                if candidate.name != name:
+                    continue
+                candidate_source = candidate.source or contract.source
+                if candidate_source == source and candidate.line == item.line:
+                    continue
+                signature = (
+                    candidate.name,
+                    tuple(parameter.type.strip() for parameter in candidate.parameters),
+                    candidate_source,
+                    candidate.line,
+                )
+                candidates_by_declaration[signature] = candidate
+            candidates = list(candidates_by_declaration.values())
             if not candidates:
                 blockers.append(f"blocked:super_callee_unresolved:{name}:{source}:{item.line}")
                 provenance.append(f"unresolved_path:super.{name}")
