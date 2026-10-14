@@ -16,3 +16,15 @@ contract PermissionlessFactory {
         return _isChild[child];
     }
 }
+
+/// @notice Mirrors the factory pattern: each registry key belongs to a newly deployed child.
+contract TransferGuard {}
+
+contract TransferGuardFactory {
+    mapping(address => bool) private _isTransferGuard;
+
+    function createTransferGuard() external returns (address transferGuard) {
+        transferGuard = address(new TransferGuard());
+        _isTransferGuard[transferGuard] = true;
+    }
+}
