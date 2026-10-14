@@ -433,6 +433,7 @@ contract CydraBlindAuthorizationTest {{
     CydraUnauthorizedCaller internal attacker;
     Verdict public verdict;
     bool public deployed;
+    bool public observedCallSucceeded;
     string internal expectedGuard = {guard_literal};
     string public verdictReason;
 {observation_declarations}
@@ -466,6 +467,8 @@ contract CydraBlindAuthorizationTest {{
         reasonLogged;
         (bool callerLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,address)", "CYDRA_OBS_CALLER", observedCaller));
         callerLogged;
+        (bool callSucceededLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_CALL_SUCCEEDED", observedCallSucceeded));
+        callSucceededLogged;
         (bool ownerBeforeLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,address)", "CYDRA_OBS_OWNER_BEFORE", observedOwnerBefore));
         ownerBeforeLogged;
         (bool ownerAfterLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,address)", "CYDRA_OBS_OWNER_AFTER", observedOwnerAfter));
@@ -524,6 +527,7 @@ contract CydraBlindAuthorizationTest {{
                 "{function.name}({','.join(parameter.type.split()[0] for parameter in function.parameters)})"{encoded_arguments}
             )
         );
+        observedCallSucceeded = ok;
 {post_observation}
 {verdict_logic}
         if (verdict == Verdict.Inconclusive && bytes(verdictReason).length == 0) verdictReason = "runtime_outcome_not_discriminating";
