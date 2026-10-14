@@ -276,3 +276,60 @@ def test_identical_function_names_have_distinct_source_identity_and_seed_binding
     selected = _resolve_hypothesis_contract(result, contract_a_hypothesis)
     assert selected.name == "ContractA"
     assert next(function for function in selected.functions if function.name == "setSlasher").line == contract_a_hypothesis.source_line
+
+
+def test_concrete_contract_includes_inherited_public_surface_with_parent_identity(tmp_path: Path):
+    from cydra.solidity_model import parse_solidity
+
+    base = tmp_path / "Base.sol"
+    child = tmp_path / "Child.sol"
+    base.write_text(
+        "pragma solidity ^0.8.20;\\n"
+        "abstract contract Base {\\n"
+        "  address public treasury;\\n"
+        "  function setTreasury(address next) public virtual { treasury = next; }\\n"
+        "  function _helper() internal {}\\n"
+        "}\\n",
+        encoding="utf-8",
+    )
+    child.write_text(
+        'pragma solidity ^0.8.20;\\nimport "./Base.sol";\\ncontract Child is Base {}\\n',
+        encoding="utf-8",
+    )
+
+    model = next(item for item in parse_solidity(child) if item.name == "Child")
+    inherited = next(item for item in model.functions if item.name == "setTreasury")
+
+    assert inherited.visibility == "public"
+    assert Path(inherited.source).name == "Base.sol"
+    assert inherited.line == 4
+    assert inherited.body_scope == "out_of_scope"
+    assert not any(item.name == "_helper" for item in model.functions)
+
+
+def test_child_override_wins_in_effective_inherited_surface(tmp_path: Path):
+    from cydra.solidity_model import parse_solidity
+
+    base = tmp_path / "Base.sol"
+    child = tmp_path / "Child.sol"
+    base.write_text(
+        "pragma solidity ^0.8.20;\\n"
+        "abstract contract Base {\\n"
+        "  function execute(address) public virtual {}\\n"
+        "}\\n",
+        encoding="utf-8",
+    )
+    child.write_text(
+        'pragma solidity ^0.8.20;\\nimport "./Base.sol";\\n'
+        "contract Child is Base {\\n"
+        "  function execute(address) public override {}\\n"
+        "}\\n",
+        encoding="utf-8",
+    )
+
+    model = next(item for item in parse_solidity(child) if item.name == "Child")
+    execute = [item for item in model.functions if item.name == "execute"]
+
+    assert len(execute) == 1
+    assert Path(execute[0].source).name == "Child.sol"
+    assert execute[0].line == 4
