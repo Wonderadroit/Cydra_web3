@@ -284,16 +284,16 @@ def test_concrete_contract_includes_inherited_public_surface_with_parent_identit
     base = tmp_path / "Base.sol"
     child = tmp_path / "Child.sol"
     base.write_text(
-        "pragma solidity ^0.8.20;\\n"
-        "abstract contract Base {\\n"
-        "  address public treasury;\\n"
-        "  function setTreasury(address next) public virtual { treasury = next; }\\n"
-        "  function _helper() internal {}\\n"
-        "}\\n",
+        "pragma solidity ^0.8.20;\n"
+        "abstract contract Base {\n"
+        "  address public treasury;\n"
+        "  function setTreasury(address next) public virtual { treasury = next; }\n"
+        "  function _helper() internal {}\n"
+        "}\n",
         encoding="utf-8",
     )
     child.write_text(
-        'pragma solidity ^0.8.20;\\nimport "./Base.sol";\\ncontract Child is Base {}\\n',
+        'pragma solidity ^0.8.20;\nimport "./Base.sol";\ncontract Child is Base {}\n',
         encoding="utf-8",
     )
 
@@ -313,17 +313,17 @@ def test_child_override_wins_in_effective_inherited_surface(tmp_path: Path):
     base = tmp_path / "Base.sol"
     child = tmp_path / "Child.sol"
     base.write_text(
-        "pragma solidity ^0.8.20;\\n"
-        "abstract contract Base {\\n"
-        "  function execute(address) public virtual {}\\n"
-        "}\\n",
+        "pragma solidity ^0.8.20;\n"
+        "abstract contract Base {\n"
+        "  function execute(address) public virtual {}\n"
+        "}\n",
         encoding="utf-8",
     )
     child.write_text(
-        'pragma solidity ^0.8.20;\\nimport "./Base.sol";\\n'
-        "contract Child is Base {\\n"
-        "  function execute(address) public override {}\\n"
-        "}\\n",
+        'pragma solidity ^0.8.20;\nimport "./Base.sol";\n'
+        "contract Child is Base {\n"
+        "  function execute(address) public override {}\n"
+        "}\n",
         encoding="utf-8",
     )
 
