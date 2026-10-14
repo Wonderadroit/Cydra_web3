@@ -15,6 +15,7 @@ from cydra.blind_authorization import generate_blind_authorization_test_from_exp
 from cydra.compiler_state import compile_state_effects
 from cydra.foundry import ExecutionResult, require_executed, run_foundry_test, test_path_for
 from cydra.authorization_pipeline import investigate_authorization
+from cydra.experiment_planning import bind_experiment
 from cydra.reasoning import (
     _declared_modifiers,
     _effective_declared_modifiers,
@@ -84,6 +85,111 @@ def _resolve_hypothesis_contract(result, hypothesis):
         )
 
     return matches[0]
+
+
+def _parse_candidate_identity(value: str) -> tuple[str, str, str, int]:
+    """Parse source-path::contract::function::line without name-only fallbacks."""
+    parts = value.split("::")
+    if len(parts) != 4 or not all(part.strip() for part in parts):
+        raise ValueError(
+            "requested candidate must be SOURCE_PATH::CONTRACT::FUNCTION::LINE"
+        )
+    source_path, contract, function, raw_line = (part.strip() for part in parts)
+    try:
+        line = int(raw_line)
+    except ValueError as exc:
+        raise ValueError("requested candidate source line must be a positive integer") from exc
+    if line < 1:
+        raise ValueError("requested candidate source line must be a positive integer")
+    return source_path.replace("\\", "/"), contract, function, line
+
+
+def _select_hypotheses(
+    hypotheses,
+    requested_candidate: str | None,
+    *,
+    target_path: str,
+):
+    """Return all blind candidates or one identity matched within the pinned source path."""
+    if requested_candidate is None:
+        return tuple(hypotheses)
+
+    requested_path, requested_contract, requested_function, requested_line = (
+        _parse_candidate_identity(requested_candidate)
+    )
+    normalized_target = target_path.replace("\\", "/").strip("/")
+    requested_path = requested_path.strip("/")
+    # The short Vault.sol spelling is safe only because the campaign separately
+    # pins target_path. It is not a global basename search across the model.
+    if "/" not in requested_path:
+        if Path(normalized_target).name != requested_path:
+            normalized_target = "__candidate_path_mismatch__"
+        requested_path = normalized_target
+
+    def path_matches(candidate_path: str | None) -> bool:
+        if not candidate_path:
+            return False
+        normalized = str(candidate_path).replace("\\", "/").strip("/")
+        requested = requested_path.rstrip("/")
+        return normalized == requested or normalized.endswith("/" + requested)
+
+    matches = [
+        item for item in hypotheses
+        if path_matches(item.source_path)
+        and item.declaring_contract == requested_contract
+        and item.target_function == requested_function
+        and item.source_line == requested_line
+    ]
+    if not matches:
+        raise SystemExit(
+            "candidate-missing: no hypothesis matches requested identity "
+            f"{requested_candidate!r}"
+        )
+    if len(matches) != 1:
+        raise SystemExit(
+            "candidate-ambiguous: "
+            f"{len(matches)} hypotheses match requested identity {requested_candidate!r}"
+        )
+    return (matches[0],)
+
+
+def _campaign_collection_payload(
+    *,
+    target: str,
+    campaign_mode: str,
+    requested_candidate: str | None,
+    hypotheses,
+    candidate_results,
+    seeds=(),
+    outcome_records=(),
+):
+    """Serialize every candidate result; targeted mode alone has a final_result."""
+    results = list(candidate_results)
+    final_result = results[0] if campaign_mode == "targeted" and len(results) == 1 else None
+    return {
+        "target": target,
+        "campaign_mode": campaign_mode,
+        "requested_candidate": requested_candidate,
+        "candidate_count": len(hypotheses),
+        "candidate_order": [item.hypothesis_id for item in hypotheses],
+        "hypothesis_seeds": _json(seeds),
+        "non_transitions": [
+            item for item in outcome_records if item.get("outcome") == "non_transition"
+        ],
+        "seed_outcomes": _json(outcome_records),
+        "candidate_results": results,
+        "final_result": final_result,
+        "classification": final_result.get("classification") if final_result else "COLLECTION",
+        "finding_gate": final_result.get("finding_gate", "NOT_READY") if final_result else "NOT_READY",
+    }
+
+
+def _write_campaign_collection(output: Path | None, payload: dict) -> None:
+    """Persist the growing collection after each candidate so later failures lose no evidence."""
+    if output is None:
+        return
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(_json(payload), indent=2) + "\n", encoding="utf-8")
 
 
 def _prepare_isolated_foundry_project(target_root: Path, source: Path, destination: Path) -> Path:
@@ -460,6 +566,15 @@ def main() -> int:
     parser.add_argument("--target-ref", required=True)
     parser.add_argument("--target-path", required=True)
     parser.add_argument("--target-project", required=True)
+    parser.add_argument(
+        "--mode",
+        choices=("blind", "targeted"),
+        help="Campaign contract: blind measures all candidates; targeted measures one explicit identity.",
+    )
+    parser.add_argument(
+        "--requested-candidate",
+        help="Full identity SOURCE_PATH::CONTRACT::FUNCTION::LINE; implies targeted mode unless --mode blind is explicit.",
+    )
     parser.add_argument("--expected-status", choices=("confirmed", "not_confirmed"), default="confirmed")
     parser.add_argument("--require-ready", action="store_true")
     parser.add_argument("--measurement-only", action="store_true", help="Record measured outcomes without enforcing the benchmark expected-status exit code.")
@@ -478,6 +593,18 @@ def main() -> int:
         help="Install an npm package into the historical target before bounded execution.",
     )
     args = parser.parse_args()
+    if args.mode == "blind" and args.requested_candidate is not None:
+        parser.error("--requested-candidate is forbidden in blind mode")
+    if args.mode == "targeted" and not args.requested_candidate:
+        parser.error("--requested-candidate is required in targeted mode")
+    campaign_mode = args.mode or (
+        "targeted" if args.requested_candidate is not None else "blind"
+    )
+    if args.requested_candidate is not None:
+        try:
+            _parse_candidate_identity(args.requested_candidate)
+        except ValueError as exc:
+            parser.error(str(exc))
 
     root = Path(__file__).resolve().parents[1]
     with tempfile.TemporaryDirectory(prefix="cydra-blind-auth-") as temp:
@@ -508,6 +635,17 @@ def main() -> int:
             semantic_evidence=compiler.evidence,
         )
         hypotheses = [h for h in result.hypotheses if h.invariant_id == "INV-AUTH-001"]
+        if args.requested_candidate is not None and not hypotheses:
+            raise SystemExit(
+                "candidate-missing: authorization derivation produced no candidates "
+                "for the requested identity"
+            )
+        if args.requested_candidate is not None:
+            hypotheses = list(
+                _select_hypotheses(
+                    hypotheses, args.requested_candidate, target_path=args.target_path
+                )
+            )
         related_intent_parity_hypotheses = [
             h for h in result.hypotheses
             if h.invariant_id.startswith("INV-INTENT-PARITY-")
@@ -566,7 +704,7 @@ def main() -> int:
             }
             if args.output:
                 args.output.parent.mkdir(parents=True, exist_ok=True)
-                args.output.write_text(json.dumps(_json(payload), indent=2) + "\\n", encoding="utf-8")
+                args.output.write_text(json.dumps(_json(payload), indent=2) + "\n", encoding="utf-8")
             print("STAGING_UNSUPPORTED", str(exc))
             return 2
         for dependency in args.target_npm_dependency:
@@ -590,21 +728,45 @@ def main() -> int:
                 )
                 foundry_toml.write_text(current, encoding="utf-8")
 
-        source_root = project
         source_relative = Path(source).relative_to(project)
+        candidate_results = []
+        benchmark_mismatch = False
+        readiness_failure = False
+        target_label = f"{args.target_repo}@{args.target_ref}:{args.target_path}"
+
+        def persist_collection():
+            payload = _campaign_collection_payload(
+                target=target_label,
+                campaign_mode=campaign_mode,
+                requested_candidate=args.requested_candidate,
+                hypotheses=hypotheses,
+                candidate_results=candidate_results,
+                seeds=getattr(result, "seeds", ()),
+                outcome_records=getattr(result, "outcome_records", ()),
+            )
+            _write_campaign_collection(args.output, payload)
+
         for hypothesis in hypotheses:
-            experiment_matches = [e for e in result.experiments if e.hypothesis_id == hypothesis.hypothesis_id]
+            experiment_matches = [
+                item for item in result.experiments
+                if item.hypothesis_id == hypothesis.hypothesis_id
+            ]
             if len(experiment_matches) != 1:
-                raise SystemExit(f"candidate-missing: expected one experiment for {hypothesis.hypothesis_id}, got {len(experiment_matches)}")
-            experiment = experiment_matches[0]
+                raise SystemExit(
+                    "candidate-missing: expected exactly one experiment for "
+                    f"{hypothesis.hypothesis_id}, got {len(experiment_matches)}"
+                )
+            planned_experiment = experiment_matches[0]
+            experiment = bind_experiment(
+                hypothesis,
+                planned_experiment,
+                target_function=hypothesis.target_function,
+                planned_inputs=planned_experiment.planned_inputs,
+            )
             contract = _resolve_hypothesis_contract(result, hypothesis)
-            # The blind harness now deploys the modeled contract directly.
-            # Avoid a separate forge-inspect preflight: Foundry's generated
-            # constructor helper can fail before the actual experiment even
-            # when the typed deployment is valid. Execution itself remains the
-            # authoritative compilation/execution measurement.
-            creation_bytecode = None
-            output = test_path_for(execution_project, f"generated/{hypothesis.hypothesis_id}.t.sol")
+            output = test_path_for(
+                execution_project, f"generated/{hypothesis.hypothesis_id}.t.sol"
+            )
             try:
                 generated = generate_blind_authorization_test_from_experiment(
                     hypothesis,
@@ -615,10 +777,6 @@ def main() -> int:
                     contract,
                 )
             except ValueError as exc:
-                # A missing constructor type is a modeling/execution-precondition
-                # gap, not evidence about the target. Preserve it explicitly as
-                # UNMEASURABLE instead of fabricating an ABI value or crashing the
-                # benchmark before an evidence artifact can be written.
                 execution = ExecutionResult(
                     experiment_id=experiment.experiment_id,
                     target=str(source),
@@ -631,66 +789,69 @@ def main() -> int:
                     stdout="",
                     stderr=f"authorization experiment could not be rendered faithfully: {exc}",
                 )
-                print("EXECUTION_STATUS", execution.status, "reason=", execution.stderr)
                 outcome = classify_authorization_blind_execution(hypothesis, execution)
-                payload = {
-                    "target": f"{args.target_repo}@{args.target_ref}:{args.target_path}",
-                    "hypothesis_seeds": _json(getattr(result, "seeds", ())),
-            "non_transitions": [item for item in getattr(result, "outcome_records", ()) if item.get("outcome") == "non_transition"],
-            "seed_outcomes": _json(getattr(result, "outcome_records", ())),
+                candidate_payload = {
+                    "candidate_identity": {
+                        "source_path": hypothesis.source_path,
+                        "declaring_contract": hypothesis.declaring_contract,
+                        "target_function": hypothesis.target_function,
+                        "source_line": hypothesis.source_line,
+                    },
                     "hypothesis": _json(hypothesis),
                     "experiment": _json(experiment),
+                    "contract": contract.name,
                     "blind_execution": _json(execution),
                     "classification": outcome.benchmark_status,
                     "verdict": outcome.verdict,
                     "verdict_reason": outcome.verdict_reason,
                     "finding_gate": "NOT_READY",
                 }
-                if args.output:
-                    args.output.parent.mkdir(parents=True, exist_ok=True)
-                    args.output.write_text(
-                        json.dumps(_json(payload), indent=2) + "\\n",
-                        encoding="utf-8",
-                    )
+                candidate_results.append(candidate_payload)
+                if not args.measurement_only and outcome.benchmark_status != args.expected_status:
+                    benchmark_mismatch = True
+                persist_collection()
                 print(
                     f"{hypothesis.hypothesis_id}: status={execution.status} "
-                    f"classification={outcome.benchmark_status} evidence={outcome.evidence.evidence_id}"
+                    f"classification={outcome.benchmark_status} "
+                    f"evidence={outcome.evidence.evidence_id}"
                 )
-                return 2
-            execution = run_foundry_test(execution_project, generated, experiment.experiment_id, "blind")
-            print("EXECUTION_STATUS", execution.status, "exit=", execution.exit_code, "tests=", execution.tests_run, "failed=", execution.tests_failed)
+                continue
+
+            execution = run_foundry_test(
+                execution_project, generated, experiment.experiment_id, "blind"
+            )
+            print(
+                "EXECUTION_STATUS", execution.status,
+                "exit=", execution.exit_code,
+                "tests=", execution.tests_run,
+                "failed=", execution.tests_failed,
+            )
             print(execution.stdout)
             print(execution.stderr)
-            # UNMEASURABLE is a legitimate measurement outcome; preserve it
-            # instead of converting a compiler/precondition gap into a runner crash.
             outcome = classify_authorization_blind_execution(hypothesis, execution)
             print(
                 f"{hypothesis.hypothesis_id}: status={execution.status} "
-                f"classification={outcome.benchmark_status} evidence={outcome.evidence.evidence_id}"
+                f"classification={outcome.benchmark_status} "
+                f"evidence={outcome.evidence.evidence_id}"
             )
-            if not args.measurement_only and outcome.benchmark_status != args.expected_status:
-                return 2
-
-            payload={
-                "target": f"{args.target_repo}@{args.target_ref}:{args.target_path}",
-                "hypothesis_seeds": _json(getattr(result, "seeds", ())),
-                "non_transitions": [
-                    item
-                    for item in getattr(result, "outcome_records", ())
-                    if item.get("outcome") == "non_transition"
-                ],
-                "seed_outcomes": _json(
-                    getattr(result, "outcome_records", ())
-                ),
+            candidate_payload = {
+                "candidate_identity": {
+                    "source_path": hypothesis.source_path,
+                    "declaring_contract": hypothesis.declaring_contract,
+                    "target_function": hypothesis.target_function,
+                    "source_line": hypothesis.source_line,
+                },
                 "hypothesis": _json(hypothesis),
                 "experiment": _json(experiment),
+                "contract": contract.name,
                 "blind_execution": _json(execution),
                 "classification": outcome.benchmark_status,
                 "verdict": outcome.verdict,
                 "verdict_reason": outcome.verdict_reason,
-                "finding_gate": "CONFIRMED_ONLY",
+                "finding_gate": "CONFIRMED_ONLY" if outcome.benchmark_status == "confirmed" else "NOT_READY",
             }
-            if args.require_ready and outcome.benchmark_status=="confirmed":
+
+            if args.require_ready and outcome.benchmark_status == "confirmed":
                 isolated_source = execution_project / source_relative
                 auth_context = "\n".join(
                     path.read_text(encoding="utf-8")
@@ -698,29 +859,100 @@ def main() -> int:
                 )
                 modifier = _auth_modifier(auth_context)
                 print("AUTHORIZATION_CONTROL", modifier)
-                if modifier is None: print("AUTHORIZATION_CAUSAL_CONTROL_UNAVAILABLE"); return 3
-                original=_apply_auth_control(isolated_source,hypothesis.target_function,modifier)
-                try:
-                    patched_test=generated.with_name(generated.stem+"-patched.t.sol"); _patched_auth_test(generated,patched_test)
-                    patched=run_foundry_test(execution_project,patched_test,hypothesis.hypothesis_id+":patched","patched")
-                finally: isolated_source.write_text(original,encoding="utf-8")
-                causal=execution.status=="FAIL" and patched.status=="PASS"
-                reproduction=run_foundry_test(execution_project,generated,hypothesis.hypothesis_id+":reproduction","reproduction")
-                original=_apply_auth_control(isolated_source,hypothesis.target_function,modifier)
-                try:
-                    repro_test=generated.with_name(generated.stem+"-reproduction-patched.t.sol"); _patched_auth_test(generated,repro_test)
-                    repro_patched=run_foundry_test(execution_project,repro_test,hypothesis.hypothesis_id+":reproduction-patched","reproduction-patched")
-                finally: isolated_source.write_text(original,encoding="utf-8")
-                repro= reproduction.status=="FAIL" and repro_patched.status=="PASS"
-                print("PATCHED_EXECUTION_STATUS", patched.status, "CAUSAL_VERIFICATION", causal)
-                print("REPRODUCTION_EXECUTION_STATUS", reproduction.status, "REPRODUCTION_PATCHED_EXECUTION_STATUS", repro_patched.status, "REPRODUCTION_VERIFICATION", repro)
-                payload.update({"authorization_control":modifier,"patched_execution":_json(patched),"causal_verification":{"state":"verified" if causal else "not_verified","chain_id":"causal:authorization-modifier-differential"},"reproduction_execution":_json(reproduction),"reproduction_patched_execution":_json(repro_patched),"reproduction_verification":{"state":"verified" if repro else "not_verified","chain_id":"reproduction:authorization-modifier-differential"},"finding_gate":"READY" if causal and repro and compiler.status != "source_dependency_closure_incomplete" else "NOT_READY"})
-                if args.output:
-                    args.output.parent.mkdir(parents=True,exist_ok=True)
-                    args.output.write_text(json.dumps(_json(payload),indent=2)+"\n",encoding="utf-8")
-                if not (causal and repro): return 4
-            if args.output:
-                args.output.parent.mkdir(parents=True,exist_ok=True); args.output.write_text(json.dumps(_json(payload),indent=2)+"\n",encoding="utf-8")
+                if modifier is None:
+                    print("AUTHORIZATION_CAUSAL_CONTROL_UNAVAILABLE")
+                    candidate_payload["finding_gate"] = "NOT_READY"
+                    candidate_payload["causal_verification"] = {
+                        "state": "not_verified",
+                        "reason": "authorization causal control unavailable",
+                    }
+                    readiness_failure = True
+                else:
+                    original = _apply_auth_control(
+                        isolated_source, hypothesis.target_function, modifier
+                    )
+                    try:
+                        patched_test = generated.with_name(generated.stem + "-patched.t.sol")
+                        _patched_auth_test(generated, patched_test)
+                        patched = run_foundry_test(
+                            execution_project, patched_test,
+                            hypothesis.hypothesis_id + ":patched", "patched",
+                        )
+                    finally:
+                        isolated_source.write_text(original, encoding="utf-8")
+                    causal = execution.status == "FAIL" and patched.status == "PASS"
+                    reproduction = run_foundry_test(
+                        execution_project, generated,
+                        hypothesis.hypothesis_id + ":reproduction", "reproduction",
+                    )
+                    original = _apply_auth_control(
+                        isolated_source, hypothesis.target_function, modifier
+                    )
+                    try:
+                        repro_test = generated.with_name(
+                            generated.stem + "-reproduction-patched.t.sol"
+                        )
+                        _patched_auth_test(generated, repro_test)
+                        repro_patched = run_foundry_test(
+                            execution_project, repro_test,
+                            hypothesis.hypothesis_id + ":reproduction-patched",
+                            "reproduction-patched",
+                        )
+                    finally:
+                        isolated_source.write_text(original, encoding="utf-8")
+                    repro = reproduction.status == "FAIL" and repro_patched.status == "PASS"
+                    print(
+                        "PATCHED_EXECUTION_STATUS", patched.status,
+                        "CAUSAL_VERIFICATION", causal,
+                    )
+                    print(
+                        "REPRODUCTION_EXECUTION_STATUS", reproduction.status,
+                        "REPRODUCTION_PATCHED_EXECUTION_STATUS", repro_patched.status,
+                        "REPRODUCTION_VERIFICATION", repro,
+                    )
+                    candidate_payload.update({
+                        "authorization_control": modifier,
+                        "patched_execution": _json(patched),
+                        "causal_verification": {
+                            "state": "verified" if causal else "not_verified",
+                            "chain_id": "causal:authorization-modifier-differential",
+                        },
+                        "reproduction_execution": _json(reproduction),
+                        "reproduction_patched_execution": _json(repro_patched),
+                        "reproduction_verification": {
+                            "state": "verified" if repro else "not_verified",
+                            "chain_id": "reproduction:authorization-modifier-differential",
+                        },
+                        "finding_gate": (
+                            "READY"
+                            if causal and repro
+                            and compiler.status != "source_dependency_closure_incomplete"
+                            else "NOT_READY"
+                        ),
+                    })
+                    if not (causal and repro):
+                        readiness_failure = True
+
+            candidate_results.append(candidate_payload)
+            if not args.measurement_only and outcome.benchmark_status != args.expected_status:
+                benchmark_mismatch = True
+            # Persist incrementally: a later candidate failure must not erase earlier evidence.
+            persist_collection()
+
+        final_payload = _campaign_collection_payload(
+            target=target_label,
+            campaign_mode=campaign_mode,
+            requested_candidate=args.requested_candidate,
+            hypotheses=hypotheses,
+            candidate_results=candidate_results,
+            seeds=getattr(result, "seeds", ()),
+            outcome_records=getattr(result, "outcome_records", ()),
+        )
+        _write_campaign_collection(args.output, final_payload)
+        if readiness_failure:
+            return 4
+        if benchmark_mismatch:
+            return 2
         return 0
 
 

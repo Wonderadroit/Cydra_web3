@@ -108,6 +108,7 @@ jobs:
             --target-ref "$TARGET_REF"
             --target-path "$TARGET_PATH"
             --target-project "$TARGET_PROJECT"
+            --mode blind
             --output "$RUNNER_TEMP/authorization-campaign.json"
           )
           if [[ "$REQUIRE_READY" == "true" ]]; then
@@ -118,7 +119,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cydra-web3-authorization-campaign
+          name: cydra-web3-authorization-blind
           path: |
             ${{ runner.temp }}/target-intake.txt
             ${{ runner.temp }}/authorization-campaign.json
