@@ -108,9 +108,16 @@ def _bounded_callee_walk(
     contract: ContractModel, function: FunctionModel
 ) -> tuple[tuple[str, ...], tuple[str, ...], str | None, int]:
     """Resolve in-closure internal effects with source provenance and measured depth."""
-    available = (*contract.functions, *contract.inherited_functions)
+    effective: list[FunctionModel] = []
+    seen_signatures: set[tuple[str, tuple[str, ...]]] = set()
+    for item in (*contract.functions, *contract.inherited_functions):
+        signature = (item.name, tuple(parameter.type.strip() for parameter in item.parameters))
+        if signature in seen_signatures:
+            continue
+        seen_signatures.add(signature)
+        effective.append(item)
     by_name: dict[str, list[FunctionModel]] = {}
-    for item in available:
+    for item in effective:
         by_name.setdefault(item.name, []).append(item)
 
     effects: list[str] = []
