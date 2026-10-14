@@ -153,3 +153,37 @@ def test_nearest_inherited_declaration_wins_over_distant_ancestor(tmp_path: Path
     assert len(seeds) == 1
     assert seeds[0].source == str(nearest_source)
     assert seeds[0].status == "seed"
+
+
+def test_inherited_functions_dedupe_by_signature_not_line_and_keep_overloads(tmp_path: Path):
+    from cydra.solidity_model import parse_solidity
+
+    grandparent = tmp_path / "Grandparent.sol"
+    parent = tmp_path / "Parent.sol"
+    child = tmp_path / "Child.sol"
+    grandparent.write_text(
+        "pragma solidity ^0.8.20; contract Grandparent { "
+        "function touch(uint256 value) internal {} "
+        "function touch(address value) internal {} }",
+        encoding="utf-8",
+    )
+    parent.write_text(
+        'pragma solidity ^0.8.20; import "./Grandparent.sol"; '
+        "contract Parent is Grandparent { function touch(uint256 value) internal {} }",
+        encoding="utf-8",
+    )
+    child.write_text(
+        'pragma solidity ^0.8.20; import "./Parent.sol"; contract Child is Parent {}',
+        encoding="utf-8",
+    )
+
+    contract = next(item for item in parse_solidity(child) if item.name == "Child")
+    touches = [item for item in contract.inherited_functions if item.name == "touch"]
+    signatures = [
+        (item.name, tuple(parameter.type.strip() for parameter in item.parameters))
+        for item in touches
+    ]
+    assert signatures.count(("touch", ("uint256",))) == 1
+    assert signatures.count(("touch", ("address",))) == 1
+    uint_touch = next(item for item in touches if item.parameters[0].type.strip() == "uint256")
+    assert uint_touch.source == str(parent.resolve())
