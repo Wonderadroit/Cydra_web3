@@ -759,10 +759,33 @@ def main() -> int:
                 if item.hypothesis_id == hypothesis.hypothesis_id
             ]
             if len(experiment_matches) != 1:
-                raise SystemExit(
+                reason = (
                     "candidate-missing: expected exactly one experiment for "
                     f"{hypothesis.hypothesis_id}, got {len(experiment_matches)}"
                 )
+                candidate_results.append({
+                    "candidate_identity": {
+                        "source_path": hypothesis.source_path,
+                        "declaring_contract": hypothesis.declaring_contract,
+                        "target_function": hypothesis.target_function,
+                        "source_line": hypothesis.source_line,
+                    },
+                    "hypothesis": _json(hypothesis),
+                    "classification": "candidate_resolution_failed",
+                    "verdict": "UNMEASURABLE",
+                    "verdict_reason": reason,
+                    "finding_gate": "NOT_READY",
+                    "blind_execution": {
+                        "executed": False,
+                        "status": "UNMEASURABLE",
+                        "stderr": reason,
+                    },
+                })
+                persist_collection()
+                print(f"{hypothesis.hypothesis_id}: {reason}; recording and continuing")
+                if campaign_mode == "targeted":
+                    break
+                continue
             planned_experiment = experiment_matches[0]
             experiment = bind_experiment(
                 hypothesis,
