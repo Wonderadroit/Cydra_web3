@@ -243,11 +243,14 @@ def generate_blind_authorization_test_from_experiment(
         source_text,
         re.DOTALL,
     ))
-    guarded_configuration_sibling = bool(re.search(
-        r"\bfunction\s+set[A-Za-z0-9_$]*\s*\([^)]*\)[^{;]*\bonlyOwner\b[^{{;]*\{",
-        source_text,
-        re.DOTALL,
-    ))
+    guarded_configuration_sibling = any(
+        match.group(1) != function.name
+        for match in re.finditer(
+            r"\bfunction\s+([A-Za-z_$][\w$]*)\s*\([^)]*\)[^{;]*\bonlyOwner\b[^{{;]*\{",
+            source_text,
+            re.DOTALL,
+        )
+    )
     authority_model_governs_state = bool(
         ownable_supported
         and state_getter
