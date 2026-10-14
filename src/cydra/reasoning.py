@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
 import re
 from typing import Iterable
 
@@ -167,11 +168,27 @@ def generate_access_control_hypotheses(
         invariant = access_control_invariant(contract, observed[0] if len(observed) == 1 else "observed privileged modifier")
     else:
         invariant = access_control_invariant(contract)
-    return tuple(
-        Hypothesis(f"H-AUTH-{f.name}", f"{f.name} may permit an unauthorized caller to mutate privileged state.", invariant.invariant_id, f.name, "arbitrary external caller", "privileged configuration or authorization state can be changed", evidence_ids=(f"E-MODEL-{f.name}",))
-        for f, modifiers in declared
-        if not modifiers and not _is_caller_scoped_write(contract, f) and not _has_caller_authorization_predicate(f)
-    )
+    hypotheses: list[Hypothesis] = []
+    for function, modifiers in declared:
+        if modifiers or _is_caller_scoped_write(contract, function) or _has_caller_authorization_predicate(function):
+            continue
+        source_path = str(Path(function.source or contract.source).resolve())
+        identity = (source_path, contract.name, function.name, function.line)
+        digest = hashlib.sha256("\\0".join(map(str, identity)).encode("utf-8")).hexdigest()[:16]
+        hypotheses.append(Hypothesis(
+            hypothesis_id=f"H-AUTH-{digest}",
+            claim=f"{function.name} may permit an unauthorized caller to mutate privileged state.",
+            invariant_id=invariant.invariant_id,
+            target_function=function.name,
+            attacker_capability="arbitrary external caller",
+            expected_impact="privileged configuration or authorization state can be changed",
+            evidence_ids=(f"E-MODEL-{function.name}",),
+            source_path=source_path,
+            declaring_contract=contract.name,
+            source_line=function.line,
+            display_label=f"H-AUTH-{function.name}",
+        ))
+    return tuple(hypotheses)
 
 
 def initialization_invariant(contract: ContractModel) -> Invariant:

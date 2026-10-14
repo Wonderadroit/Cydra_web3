@@ -70,12 +70,17 @@ def generate_blind_authorization_test_from_experiment(
         raise ValueError(
             f"experiment/hypothesis mismatch: {experiment.hypothesis_id} != {hypothesis.hypothesis_id}"
         )
-    function = next(
-        (item for item in contract_model.functions if item.name == hypothesis.target_function),
-        None,
-    )
-    if function is None:
-        raise ValueError(f"Model has no target function: {hypothesis.target_function}")
+    if not all((hypothesis.source_path, hypothesis.declaring_contract, hypothesis.source_line is not None)):
+        raise ValueError("candidate-missing: hypothesis has no complete source identity tuple")
+    identity = (str(Path(hypothesis.source_path).resolve()), hypothesis.declaring_contract, hypothesis.target_function, hypothesis.source_line)
+    if str(Path(contract_model.source).resolve()) != identity[0] or contract_model.name != identity[1]:
+        raise ValueError("candidate-mismatch: contract model does not match hypothesis source identity")
+    matches = [item for item in contract_model.functions if item.name == identity[2] and item.line == identity[3] and str(Path(item.source or contract_model.source).resolve()) == identity[0]]
+    if not matches:
+        raise ValueError(f"candidate-missing: no function matches source identity {identity!r}")
+    if len(matches) != 1:
+        raise ValueError(f"candidate-ambiguous: {len(matches)} functions match source identity {identity!r}")
+    function = matches[0]
     if function.visibility not in {"public", "external"}:
         raise ValueError(f"authorization target {function.name} is not externally callable")
 

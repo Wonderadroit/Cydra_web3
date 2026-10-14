@@ -112,6 +112,12 @@ class Hypothesis:
     # peer functions from prose or benchmark-specific names.
     related_functions: tuple[str, ...] = field(default_factory=tuple)
     potential_impact: str = "UNKNOWN"
+    # Full source identity is authoritative; display_label is presentation only.
+    source_path: str | None = None
+    declaring_contract: str | None = None
+    source_line: int | None = None
+    originating_seed_id: str | None = None
+    display_label: str | None = None
 
 
 @dataclass(frozen=True)

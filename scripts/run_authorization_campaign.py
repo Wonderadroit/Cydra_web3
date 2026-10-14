@@ -29,6 +29,26 @@ def _seed_coverage_allows_measurement(hypotheses, seeds) -> bool:
 
 
 
+def _resolve_hypothesis_contract(result, hypothesis):
+    """Resolve a candidate only by its full source identity tuple; never fall back to name."""
+    if not all((hypothesis.source_path, hypothesis.declaring_contract, hypothesis.source_line is not None)):
+        raise SystemExit(f"candidate-missing: incomplete identity tuple for {hypothesis.hypothesis_id}")
+    identity = (str(Path(hypothesis.source_path).resolve()), hypothesis.declaring_contract, hypothesis.target_function, hypothesis.source_line)
+    matches = [
+        contract for contract in result.contracts
+        if contract.name == identity[1]
+        and str(Path(contract.source).resolve()) == identity[0]
+        and sum(1 for function in contract.functions
+            if function.name == identity[2] and function.line == identity[3]
+            and str(Path(function.source or contract.source).resolve()) == identity[0]) == 1
+    ]
+    if not matches:
+        raise SystemExit(f"candidate-missing: no contract/function matches {identity!r}")
+    if len(matches) != 1:
+        raise SystemExit(f"candidate-ambiguous: {len(matches)} contracts match {identity!r}")
+    return matches[0]
+
+
 def _prepare_isolated_foundry_project(target_root: Path, source: Path, destination: Path) -> Path:
     """Copy only the target's local Solidity import closure into a clean Foundry root."""
     source_root = next(
@@ -494,11 +514,11 @@ def main() -> int:
         )
         source_relative = Path(source).relative_to(source_root)
         for hypothesis in hypotheses:
-            experiment = next(e for e in result.experiments if e.hypothesis_id == hypothesis.hypothesis_id)
-            contract = next(
-                c for c in result.contracts
-                if any(f.name == hypothesis.target_function for f in c.functions)
-            )
+            experiment_matches = [e for e in result.experiments if e.hypothesis_id == hypothesis.hypothesis_id]
+            if len(experiment_matches) != 1:
+                raise SystemExit(f"candidate-missing: expected one experiment for {hypothesis.hypothesis_id}, got {len(experiment_matches)}")
+            experiment = experiment_matches[0]
+            contract = _resolve_hypothesis_contract(result, hypothesis)
             # The blind harness now deploys the modeled contract directly.
             # Avoid a separate forge-inspect preflight: Foundry's generated
             # constructor helper can fail before the actual experiment even
@@ -540,6 +560,8 @@ def main() -> int:
                 payload = {
                     "target": f"{args.target_repo}@{args.target_ref}:{args.target_path}",
                     "hypothesis_seeds": _json(getattr(result, "seeds", ())),
+            "non_transitions": [item for item in getattr(result, "outcome_records", ()) if item.get("outcome") == "non_transition"],
+            "seed_outcomes": _json(getattr(result, "outcome_records", ())),
                     "hypothesis": _json(hypothesis),
                     "experiment": _json(experiment),
                     "blind_execution": _json(execution),
@@ -570,7 +592,7 @@ def main() -> int:
             )
             if outcome.benchmark_status != args.expected_status:
                 return 2
-            payload={"target":f"{args.target_repo}@{args.target_ref}:{args.target_path}","hypothesis_seeds":_json(getattr(result, "seeds", ())),"hypothesis":_json(hypothesis),"experiment":_json(experiment),"blind_execution":_json(execution),"classification":outcome.benchmark_status,"finding_gate":"CONFIRMED_ONLY"}
+            payload={"target":f"{args.target_repo}@{args.target_ref}:{args.target_path}","hypothesis_seeds":_json(getattr(result, "seeds", ())),"non_transitions":[item for item in getattr(result, "outcome_records", ()) if item.get("outcome") == "non_transition"],"seed_outcomes":_json(getattr(result, "outcome_records", ())),"hypothesis":_json(hypothesis),"experiment":_json(experiment),"blind_execution":_json(execution),"classification":outcome.benchmark_status,"finding_gate":"CONFIRMED_ONLY"}
             if args.require_ready and outcome.benchmark_status=="confirmed":
                 isolated_source = execution_project / "src" / source_relative
                 auth_context = "\n".join(
