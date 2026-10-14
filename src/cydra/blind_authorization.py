@@ -239,7 +239,7 @@ def generate_blind_authorization_test_from_experiment(
     # permissionless state updates. The inference is recorded explicitly; it is not
     # applied to arbitrary state changes or newly-created mapping keys.
     target_is_guarded = bool(re.search(
-        rf"\bfunction\s+{re.escape(function.name)}\s*\([^)]*\)[^{;]*\bonlyOwner\b",
+        rf"\bfunction\s+{re.escape(function.name)}\s*\([^)]*\)[^{{;]*\bonlyOwner\b",
         source_text,
         re.DOTALL,
     ))
