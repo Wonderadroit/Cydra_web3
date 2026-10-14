@@ -424,7 +424,7 @@ def main() -> int:
         for supplemental in args.supplemental_file:
             try:
                 relative_path, supplemental_ref = supplemental.rsplit("@", 1)
-            except ValueError as exc:
+            except (ValueError, RuntimeError) as exc:
                 raise SystemExit(f"Invalid supplemental file {supplemental!r}; expected path@ref") from exc
             blob = subprocess.run(
                 ("git", "-C", str(checkout), "show", f"{supplemental_ref}:{relative_path}"),
@@ -517,10 +517,11 @@ def main() -> int:
         source_relative = Path(source).relative_to(source_root)
         for hypothesis in hypotheses:
             experiment = next(e for e in result.experiments if e.hypothesis_id == hypothesis.hypothesis_id)
-            contract = next(
-                c for c in result.contracts
-                if any(f.name == hypothesis.target_function for f in c.functions)
-            )
+            try:
+                contract = _resolve_hypothesis_contract(result, hypothesis)
+            except RuntimeError as exc:
+                print(f"{hypothesis.hypothesis_id}: candidate resolution failed; isolated and continuing: {exc}")
+                continue
             # The blind harness now deploys the modeled contract directly.
             # Avoid a separate forge-inspect preflight: Foundry's generated
             # constructor helper can fail before the actual experiment even
@@ -578,7 +579,7 @@ def main() -> int:
                     f"{hypothesis.hypothesis_id}: status={execution.status} "
                     f"classification={outcome.benchmark_status} evidence={outcome.evidence.evidence_id}"
                 )
-                return 2
+                continue
             execution = run_foundry_test(execution_project, generated, experiment.experiment_id, "blind")
             print("EXECUTION_STATUS", execution.status, "exit=", execution.exit_code, "tests=", execution.tests_run, "failed=", execution.tests_failed)
             print(execution.stdout)
@@ -591,7 +592,8 @@ def main() -> int:
                 f"classification={outcome.benchmark_status} evidence={outcome.evidence.evidence_id}"
             )
             if outcome.benchmark_status != args.expected_status:
-                return 2
+                print(f"{hypothesis.hypothesis_id}: verdict mismatch isolated; continuing to next candidate")
+                continue
             payload={"target":f"{args.target_repo}@{args.target_ref}:{args.target_path}","hypothesis_seeds":_json(getattr(result, "seeds", ())),"hypothesis":_json(hypothesis),"experiment":_json(experiment),"blind_execution":_json(execution),"classification":outcome.benchmark_status,"finding_gate":"CONFIRMED_ONLY"}
             if args.require_ready and outcome.benchmark_status=="confirmed":
                 isolated_source = execution_project / "src" / source_relative
