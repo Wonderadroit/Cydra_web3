@@ -85,13 +85,13 @@ def _function_body(function: FunctionModel, contract: ContractModel) -> str | No
     except (OSError, UnicodeError):
         return None
     pattern = re.compile(
-        r"\\bfunction\\s+" + re.escape(function.name) + r"\\s*\\([^)]*\\)[^{;]*\\{",
+        r"\bfunction\s+" + re.escape(function.name) + r"\s*\([^)]*\)[^{;]*\{",
         re.MULTILINE,
     )
     matches = list(pattern.finditer(source))
     if not matches:
         return None
-    match = min(matches, key=lambda item: abs(source.count("\\n", 0, item.start()) + 1 - function.line))
+    match = min(matches, key=lambda item: abs(source.count("\n", 0, item.start()) + 1 - function.line))
     opening = match.end() - 1
     depth = 1
     end = opening + 1
@@ -107,15 +107,8 @@ def _function_body(function: FunctionModel, contract: ContractModel) -> str | No
 def _bounded_callee_walk(
     contract: ContractModel, function: FunctionModel
 ) -> tuple[tuple[str, ...], tuple[str, ...], str | None, int]:
-    """Resolve in-closure internal effects with source provenance and a measured budget.
-
-    Returns (effect records, provenance records, blocker, measured_depth). Unknown
-    dispatch is fail-closed. External Permit2/AllowanceHolder implementations are
-    boundaries: their calls are recorded but never traversed.
-    """
-    local = tuple(contract.functions)
-    inherited = tuple(contract.inherited_functions)
-    available = (*local, *inherited)
+    """Resolve in-closure internal effects with source provenance and measured depth."""
+    available = (*contract.functions, *contract.inherited_functions)
     by_name: dict[str, list[FunctionModel]] = {}
     for item in available:
         by_name.setdefault(item.name, []).append(item)
@@ -131,17 +124,14 @@ def _bounded_callee_walk(
         "unchecked", "delete",
     }
 
-    def declaration_key(item: FunctionModel) -> tuple[str, str, int]:
-        return (item.name, item.source or contract.source, item.line)
-
     def walk(item: FunctionModel, depth: int) -> None:
         nonlocal max_depth
         max_depth = max(max_depth, depth)
-        key = declaration_key(item)
+        source = item.source or contract.source
+        key = (item.name, source, item.line)
         if key in visited:
             return
         visited.add(key)
-        source = item.source or contract.source
         if item.body_scope == "out_of_scope":
             blockers.append(f"blocked:callee_body_out_of_scope:{source}::{item.name}")
             return
@@ -153,8 +143,8 @@ def _bounded_callee_walk(
         writes = tuple(item.writes) or tuple(
             name for name in contract.state_variables
             if re.search(
-                r"\\b" + re.escape(name) +
-                r"\\b(?:\\s*\\[[^]]*\\])*\\s*(?:=(?!=)|\\+=|-=|\\*=|/=|\\+\\+|--)",
+                r"\b" + re.escape(name) +
+                r"\b(?:\s*\[[^]]*\])*\s*(?:=(?!=)|\+=|-=|\*=|/=|\+\+|--)",
                 body,
             )
         )
@@ -164,53 +154,45 @@ def _bounded_callee_walk(
                 effects.append(record)
             provenance.append(f"effect_provenance:{record}:{source}:{item.line}:{item.name}")
 
-        # Low-level calls are only attributed when the target is explicitly
-        # recognizable. delegatecall is never assigned callee storage effects.
-        if re.search(r"\\.delegatecall\\s*\\(", body):
+        if re.search(r"\.delegatecall\s*\(", body):
             blockers.append(f"blocked:delegatecall_storage_context_unmodeled:{source}:{item.line}:{item.name}")
-        for low in re.finditer(r"\\b([A-Za-z_]\\w*)\\s*\\.\\s*call\\s*(?:\\{|\\()", body):
+        for low in re.finditer(r"\b([A-Za-z_]\w*)\s*\.\s*call\s*(?:\{|\()", body):
             receiver = low.group(1)
-            if receiver.lower() in {"permit2", "allowanceholder"}:
-                record = f"external_call:{receiver}"
+            lowered = receiver.lower()
+            if lowered in {"permit2", "allowanceholder"}:
+                target = "Permit2" if lowered == "permit2" else "AllowanceHolder"
+                record = f"external_call:{target}"
                 if record not in effects:
                     effects.append(record)
                 provenance.append(f"effect_provenance:{record}:{source}:{item.line}:{item.name}")
             else:
                 blockers.append(f"blocked:low_level_call_target_unresolved:{receiver}:{source}:{item.line}:{item.name}")
-        for low in re.finditer(r"\\.staticcall\\s*\\(", body):
-            # staticcall cannot write target storage, but can affect branch decisions;
-            # classify only as an external read boundary and do not follow it.
-            effects.append(f"external_staticcall:{source}:{item.line}")
-            provenance.append(f"effect_provenance:external_staticcall:{source}:{item.line}:{item.name}")
+        for low in re.finditer(r"\.staticcall\s*\(", body):
+            record = f"external_staticcall:{source}:{item.line}"
+            if record not in effects:
+                effects.append(record)
+            provenance.append(f"effect_provenance:{record}:{item.name}")
 
-        # Calls to signature authorization are a deliberate model boundary.
-        if re.search(r"(?<![.\\w])_dispatchPermit\\s*\\(", body):
+        if re.search(r"(?<![.\w])_dispatchPermit\s*\(", body):
             blockers.append("blocked:signature_authorization_unsupported")
-        calls: list[str] = []
-        for match in re.finditer(r"(?<![.\\w])([A-Za-z_]\\w*)\\s*\\(", body):
+
+        for match in re.finditer(r"(?<![.\w])([A-Za-z_]\w*)\s*\(", body):
             name = match.group(1)
-            if name in excluded or name == item.name or name.startswith("_dispatchPermit"):
-                continue
-            # Ignore calls whose receiver is explicit; they are handled as external boundaries.
-            prefix = body[max(0, match.start() - 80):match.start()]
-            if re.search(r"[.>]\\s*$", prefix):
+            if name in excluded or name == item.name or name == "_dispatchPermit":
                 continue
             candidates = by_name.get(name, [])
             if not candidates:
+                # Builtins and unmodeled external/member calls are not followed here.
+                # Explicitly known caller/read helpers must be modeled to prove closure.
+                if name in {"_msgSender", "_isForwarded"}:
+                    blockers.append(f"blocked:callee_reference_unresolved:{name}:{source}:{item.line}")
                 continue
-            # Overloads require exact argument-type resolution, which this lexical
-            # walker does not pretend to perform.
             if len(candidates) > 1:
                 blockers.append(f"blocked:internal_overload_ambiguous:{name}:{source}:{item.line}")
                 continue
             callee = candidates[0]
-            if callee.body_scope == "out_of_scope":
-                blockers.append(f"blocked:callee_body_out_of_scope:{callee.source or contract.source}::{name}")
-                continue
-            calls.append(name)
             walk(callee, depth + 1)
 
-        # The model records external call facts separately from source call syntax.
         for call in item.external_calls:
             call_text = ".".join(str(part) for part in call) if isinstance(call, (tuple, list)) else str(call)
             lowered = call_text.lower()
@@ -221,30 +203,29 @@ def _bounded_callee_walk(
                     effects.append(record)
                 provenance.append(f"effect_provenance:{record}:{source}:{item.line}:{item.name}")
 
-    if function.body_scope == "out_of_scope":
-        return (), (), f"blocked:callee_body_out_of_scope:{function.source or contract.source}::{function.name}", 0
     walk(function, 0)
-    # Calls in the observed Settler path form a small, acyclic internal graph;
-    # the maximum observed simple-path depth is the budget. A cycle is handled
-    # by visited-signature protection rather than an arbitrary global cutoff.
-    budget = max_depth
-    blocker = next((item for item in blockers if item == "blocked:signature_authorization_unsupported"), None)
-    if blocker is None and blockers:
-        blocker = blockers[0]
-    if not blocker:
-        effects.insert(0, "resolved_effects" if any(item.startswith("write:") for item in effects) else "resolved_read")
-    provenance.extend(f"callee_walk_depth:{budget}" for _ in (0,) if budget)
-    return tuple(dict.fromkeys(effects)), tuple(dict.fromkeys(provenance)), blocker, budget
+    blocker = (
+        "blocked:signature_authorization_unsupported"
+        if "blocked:signature_authorization_unsupported" in blockers
+        else blockers[0] if blockers else None
+    )
+    if blocker is None:
+        effects.insert(
+            0,
+            "resolved_effects" if any(item.startswith("write:") or item.startswith("external_call:") for item in effects)
+            else "resolved_read",
+        )
+    if max_depth:
+        provenance.append(f"callee_walk_measured_depth:{max_depth}")
+    return tuple(dict.fromkeys(effects)), tuple(dict.fromkeys(provenance)), blocker, max_depth
 
 
 def _unresolved_execution_path(
     contract: ContractModel, function: FunctionModel
 ) -> tuple[str, ...]:
-    """Compatibility surface: return blocker/effect provenance from bounded walk."""
-    effects, provenance, blocker, _depth = _bounded_callee_walk(contract, function)
-    if blocker:
-        return (blocker, *provenance)
-    return (*effects, *provenance)
+    """Return explicit blockers from the bounded walk; resolved effects are not blockers."""
+    _effects, provenance, blocker, _depth = _bounded_callee_walk(contract, function)
+    return (blocker, *provenance) if blocker else ()
 
 def _effective_functions(contract: ContractModel) -> tuple[FunctionModel, ...]:
     """Return one model per effective signature, preferring the nearest declaration.
