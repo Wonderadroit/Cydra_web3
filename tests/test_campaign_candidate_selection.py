@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -13,6 +14,7 @@ from scripts.run_authorization_campaign import (
     _campaign_collection_payload,
     _parse_candidate_identity,
     _select_hypotheses,
+    _write_campaign_collection,
 )
 
 
@@ -186,3 +188,16 @@ def test_cli_rejects_requested_candidate_in_explicit_blind_mode():
 
     assert result.returncode == 2
     assert "--requested-candidate is forbidden in blind mode" in result.stderr
+
+
+
+def test_campaign_collection_writer_emits_valid_json(tmp_path: Path):
+    output = tmp_path / "campaign.json"
+    payload = {
+        "campaign_mode": "blind",
+        "candidate_results": [{"classification": "UNMEASURABLE"}],
+    }
+
+    _write_campaign_collection(output, payload)
+
+    assert json.loads(output.read_text(encoding="utf-8")) == payload
