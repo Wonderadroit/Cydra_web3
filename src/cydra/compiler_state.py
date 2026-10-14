@@ -32,6 +32,7 @@ class CompilerEvidenceResult:
     source_ast_found: bool = False
     source_dependency_count: int = 0
     unresolved_imports: tuple[str, ...] = ()
+    source_closure: tuple[str, ...] = ()
 
 
 def _source_keys(payload: dict[str, Any], source: Path, project: Path) -> tuple[tuple[str, dict[str, Any]], ...]:
@@ -347,7 +348,7 @@ def _compile_hardhat_state_effects(project_path: Path, source_path: Path) -> Com
         tuple(unique_evidence.values()), unique_constraints, True, status, compile_command,
         stdout, stderr, tuple(map(str, build_files)), tuple(sorted(versions)),
         len(build_files), matched_source_count, source_ast_found,
-        len(dependency_sources), tuple(sorted(unresolved_imports)),
+        len(dependency_sources), tuple(sorted(unresolved_imports)), tuple(sorted(dependency_sources)),
     )
 
 
@@ -431,5 +432,5 @@ def compile_state_effects(project: str | Path, source: str | Path) -> CompilerEv
             tuple(evidence), tuple(constraints), True, status, command,
             completed.stdout, completed.stderr, tuple(map(str, build_files)),
             tuple(sorted(versions)), len(build_files), matched_source_count,
-            source_ast_found, len(dependency_sources), tuple(sorted(unresolved_imports)),
+            source_ast_found, len(dependency_sources), tuple(sorted(unresolved_imports)), tuple(sorted(dependency_sources)),
         )
