@@ -131,6 +131,7 @@ def investigate_authorization(
     *,
     target: str | None = None,
     semantic_evidence: tuple[SemanticRelationshipEvidence, ...] = (),
+    compiler_closure: tuple[str, ...] | frozenset[str] | None = None,
 ) -> AuthorizationInvestigation:
     """Run only the authorization hypothesis path; do not invoke other bug classes.
 
@@ -139,7 +140,7 @@ def investigate_authorization(
     causal verification before any vulnerability can be claimed.
     """
     source_path = Path(source).resolve()
-    parsed = parse_solidity(source_path)
+    parsed = parse_solidity(source_path, compiler_closure=compiler_closure)
     modeled: list[ContractModel] = []
     derived: list[DerivedWriteEvidence] = []
     for contract in parsed:
