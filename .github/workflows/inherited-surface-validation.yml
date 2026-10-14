@@ -1,0 +1,51 @@
+name: Inherited Surface Validation — Regression, Verdict Fixtures, DcntEth
+
+on:
+  push:
+    branches:
+      - "campaign/inherited-surface-validation"
+
+permissions:
+  contents: read
+
+jobs:
+  validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: foundry-rs/foundry-toolchain@v1
+      - run: python -m pip install --upgrade pip pytest
+      - run: python -m pip install -e .
+      - name: Run complete regression suite including inherited-surface fixtures
+        run: python -m pytest
+      - name: Execute all three existing generated verdict fixtures
+        env:
+          PYTHONPATH: src
+        run: python scripts/run_state_control_verdict_fixtures.py
+      - name: Re-run DcntEth causal positive control
+        env:
+          PYTHONPATH: src
+        run: |
+          set -o pipefail
+          python scripts/run_authorization_campaign.py \
+            --target-repo https://github.com/decentxyz/decent-bridge.git \
+            --target-ref 7f90fd4489551b69c20d11eeecb17a3f564afb18 \
+            --target-path src/DcntEth.sol \
+            --target-project . \
+            --require-ready \
+            --output "$RUNNER_TEMP/authorization-positive-control.json" \
+            2>&1 | tee "$RUNNER_TEMP/authorization-positive-control.log"
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cydra-inherited-surface-validation
+          path: |
+            ${{ runner.temp }}/authorization-positive-control.json
+            ${{ runner.temp }}/authorization-positive-control.log
+          if-no-files-found: warn
+          retention-days: 14
