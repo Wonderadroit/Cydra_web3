@@ -153,11 +153,32 @@ def _unresolved_execution_path(
     return tuple(dict.fromkeys(unresolved))
 
 
+def _effective_functions(contract: ContractModel) -> tuple[FunctionModel, ...]:
+    """Return one model per effective signature, preferring the nearest declaration.
+
+    Direct declarations precede inherited declarations; inherited models are
+    ordered from nearer to more distant ancestors by the Solidity model. The
+    first declaration for a signature wins and retains its source provenance.
+    """
+    effective: list[FunctionModel] = []
+    seen_signatures: set[tuple[str, tuple[str, ...]]] = set()
+    for function in (*contract.functions, *contract.inherited_functions):
+        signature = (
+            function.name,
+            tuple(parameter.type.strip() for parameter in function.parameters),
+        )
+        if signature in seen_signatures:
+            continue
+        seen_signatures.add(signature)
+        effective.append(function)
+    return tuple(effective)
+
+
 def generate_hypothesis_seeds(contracts: tuple[ContractModel, ...] | list[ContractModel]) -> tuple[HypothesisSeed, ...]:
     """Emit provisional questions from writes or unresolved execution paths."""
     seeds: list[HypothesisSeed] = []
     for contract in contracts:
-        for function in contract.functions:
+        for function in _effective_functions(contract):
             if function.visibility not in {"public", "external"}:
                 continue
             observed_writes = _observed_writes(contract, function)
