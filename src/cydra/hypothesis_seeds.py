@@ -274,10 +274,15 @@ def generate_hypothesis_seeds(contracts: tuple[ContractModel, ...] | list[Contra
         for function in _effective_functions(contract):
             if function.visibility not in {"public", "external"}:
                 continue
-            observed_writes = _observed_writes(contract, function)
+            direct_writes = _observed_writes(contract, function)
+            effects, walk_provenance, walk_blocker, _walk_depth = _bounded_callee_walk(contract, function)
+            transitive_writes = tuple(
+                item.split(":", 1)[1] for item in effects if item.startswith("write:")
+            )
+            observed_writes = tuple(dict.fromkeys((*direct_writes, *transitive_writes)))
             lifecycle = _is_lifecycle_surface(function)
-            unresolved = _unresolved_execution_path(contract, function)
-            if not observed_writes and not lifecycle and not unresolved:
+            unresolved = (walk_blocker,) if walk_blocker else ()
+            if not observed_writes and not lifecycle and not unresolved and not effects:
                 continue
 
             source = function.source or contract.source
@@ -304,7 +309,7 @@ def generate_hypothesis_seeds(contracts: tuple[ContractModel, ...] | list[Contra
                     "source-level writes do not establish runtime reachability",
                     "effective inherited/helper guards require validation",
                 )
-            else:
+            elif unresolved:
                 question = (
                     f"Can a caller outside the evidenced trust boundary trigger security-relevant "
                     f"effects through {function.name} along the unresolved execution path?"
@@ -314,7 +319,20 @@ def generate_hypothesis_seeds(contracts: tuple[ContractModel, ...] | list[Contra
                 prerequisites = ("resolve_recorded_execution_path", "intended_authorization_boundary", "deployment_or_local_fork")
                 status = "blocked"
                 uncertainty = (
-                    "security-relevant effects and/or authorization along the recorded path are not established within the analysis budget",
+                    "the bounded call walk reached an explicit unsupported or unresolved boundary",
+                    "no target-specific authorization semantics are assumed",
+                )
+            else:
+                question = (
+                    f"Can a caller outside the evidenced trust boundary trigger security-relevant "
+                    f"effects through {function.name}?"
+                )
+                invariant = "Execution with security-relevant effects must be restricted to actors authorized by the target's evidenced trust boundary."
+                invariant_source = "generic"
+                prerequisites = ("intended_authorization_boundary", "deployment_or_local_fork")
+                status = "seed"
+                uncertainty = (
+                    "resolved source effects do not establish runtime reachability or authorization",
                     "no target-specific authorization semantics are assumed",
                 )
 
@@ -339,6 +357,7 @@ def generate_hypothesis_seeds(contracts: tuple[ContractModel, ...] | list[Contra
                     [f"source:{source}:{function.line}"]
                     + [f"observed_write:{name}" for name in observed_writes]
                     + [f"unresolved_path:{item}" for item in unresolved]
+                    + list(walk_provenance)
                 ),
                 uncertainty=uncertainty,
             ))
