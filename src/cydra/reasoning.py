@@ -211,7 +211,7 @@ def _state_changing_functions(
 ) -> tuple[FunctionModel, ...]:
     return tuple(
         f for f in contract.functions
-        if f.visibility in _STATE_CHANGING_VISIBILITIES and _state_writes(f, semantic_effects)
+        if f.visibility in _STATE_CHANGING_VISIBILITIES and f.body_scope == "in_scope" and _state_writes(f, semantic_effects)
     )
 
 
@@ -279,7 +279,7 @@ def generate_access_control_hypotheses(
         source_path = str(Path(function.source or contract.source).resolve())
         identity = (
             source_path,
-            contract.name,
+            function.declaring_contract or contract.name,
             function.name,
             function.line,
         )
@@ -301,7 +301,7 @@ def generate_access_control_hypotheses(
             ),
             evidence_ids=(f"E-MODEL-{function.name}",),
             source_path=source_path,
-            declaring_contract=contract.name,
+            declaring_contract=function.declaring_contract or contract.name,
             source_line=function.line,
             display_label=f"H-AUTH-{function.name}",
         ))
