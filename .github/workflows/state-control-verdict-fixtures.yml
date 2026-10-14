@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - "fix/issue-51-state-control-verdict"
+      - "fix/issue-51-artifact-resource-metadata"
   pull_request:
     branches:
       - "fix/issue-51-inherited-authority"
+      - "fix/issue-47-integration"
   workflow_dispatch:
 
 permissions:
