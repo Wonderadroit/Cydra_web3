@@ -67,7 +67,10 @@ def test_unguarded_owner_governed_preexisting_state_change_is_supported(tmp_path
     generated = _generate("StateControlFixture", guarded=False, tmp_path=tmp_path)
 
     assert 'observedStateVariable = "router";' in generated
+    assert "observedStateVariableDeclared = true;" in generated
     assert "observedStateExistedBefore = true;" in generated
+    assert "observedStateExistenceMeasured = true;" in generated
+    assert "stateMeasurementAvailable = true;" in generated
     assert "observedAuthorityModelGovernsState = true;" in generated
     assert "observedStateChanged = stateReadBeforeSucceeded && stateReadAfterSucceeded" in generated
     assert "Verdict.Supported;" in generated
