@@ -29,6 +29,26 @@ def _seed_coverage_allows_measurement(hypotheses, seeds) -> bool:
 
 
 
+def _resolve_hypothesis_contract(result, hypothesis):
+    """Resolve a candidate only by its full source identity tuple; never fall back to name."""
+    if not all((hypothesis.source_path, hypothesis.declaring_contract, hypothesis.source_line is not None)):
+        raise SystemExit(f"candidate-missing: incomplete identity tuple for {hypothesis.hypothesis_id}")
+    identity = (str(Path(hypothesis.source_path).resolve()), hypothesis.declaring_contract, hypothesis.target_function, hypothesis.source_line)
+    matches = [
+        contract for contract in result.contracts
+        if contract.name == identity[1]
+        and str(Path(contract.source).resolve()) == identity[0]
+        and sum(1 for function in contract.functions
+            if function.name == identity[2] and function.line == identity[3]
+            and str(Path(function.source or contract.source).resolve()) == identity[0]) == 1
+    ]
+    if not matches:
+        raise SystemExit(f"candidate-missing: no contract/function matches {identity!r}")
+    if len(matches) != 1:
+        raise SystemExit(f"candidate-ambiguous: {len(matches)} contracts match {identity!r}")
+    return matches[0]
+
+
 def _prepare_isolated_foundry_project(target_root: Path, source: Path, destination: Path) -> Path:
     """Copy only the target's local Solidity import closure into a clean Foundry root."""
     source_root = next(
@@ -498,15 +518,7 @@ def main() -> int:
             if len(experiment_matches) != 1:
                 raise SystemExit(f"candidate-missing: expected one experiment for {hypothesis.hypothesis_id}, got {len(experiment_matches)}")
             experiment = experiment_matches[0]
-            if not all((hypothesis.source_path, hypothesis.declaring_contract, hypothesis.source_line is not None)):
-                raise SystemExit(f"candidate-missing: incomplete identity tuple for {hypothesis.hypothesis_id}")
-            identity = (str(Path(hypothesis.source_path).resolve()), hypothesis.declaring_contract, hypothesis.target_function, hypothesis.source_line)
-            contract_matches = [contract for contract in result.contracts if contract.name == identity[1] and str(Path(contract.source).resolve()) == identity[0] and sum(1 for function in contract.functions if function.name == identity[2] and function.line == identity[3] and str(Path(function.source or contract.source).resolve()) == identity[0]) == 1]
-            if not contract_matches:
-                raise SystemExit(f"candidate-missing: no contract/function matches {identity!r}")
-            if len(contract_matches) != 1:
-                raise SystemExit(f"candidate-ambiguous: {len(contract_matches)} contracts match {identity!r}")
-            contract = contract_matches[0]
+            contract = _resolve_hypothesis_contract(result, hypothesis)
             # The blind harness now deploys the modeled contract directly.
             # Avoid a separate forge-inspect preflight: Foundry's generated
             # constructor helper can fail before the actual experiment even
