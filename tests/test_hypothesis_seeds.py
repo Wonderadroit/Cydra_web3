@@ -130,7 +130,7 @@ def test_inherited_functions_are_evaluated_once_with_nearest_declaration_precede
         encoding="utf-8",
     )
     parent_source.write_text(
-        "contract Parent { function execute() public { externalEffect(); } "
+        "contract Parent { function execute() public { target.call(""); } "
         "function balanceOf(address) external view returns (uint256) { return 0; } }",
         encoding="utf-8",
     )
