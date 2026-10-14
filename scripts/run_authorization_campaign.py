@@ -641,7 +641,11 @@ def main() -> int:
                 "for the requested identity"
             )
         if args.requested_candidate is not None:
-            hypotheses = list(\n                _select_hypotheses(\n                    hypotheses, args.requested_candidate, target_path=args.target_path\n                )\n            )
+            hypotheses = list(
+                _select_hypotheses(
+                    hypotheses, args.requested_candidate, target_path=args.target_path
+                )
+            )
         related_intent_parity_hypotheses = [
             h for h in result.hypotheses
             if h.invariant_id.startswith("INV-INTENT-PARITY-")
