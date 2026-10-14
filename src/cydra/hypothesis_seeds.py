@@ -117,7 +117,9 @@ def _bounded_callee_walk(
             return
         visited.add(key)
         if item.body_scope == "out_of_scope":
-            blockers.append(f"blocked:callee_body_out_of_scope:{source}::{item.name}")
+            reason = "blocked:inherited_body_out_of_scope" if source != (function.source or contract.source) else "blocked:callee_body_out_of_scope"
+            blockers.append(reason)
+            provenance.append(f"inherited_body_out_of_scope:{source}::{item.name}")
             return
         body = _function_body(item, contract)
         if body is None:
@@ -139,7 +141,8 @@ def _bounded_callee_walk(
             provenance.append(f"effect_provenance:{record}:{source}:{item.line}:{item.name}")
 
         if re.search(r"\.delegatecall\s*\(", body):
-            blockers.append(f"blocked:delegatecall_storage_context_unmodeled:{source}:{item.line}:{item.name}")
+            blockers.append("blocked:delegatecall_storage_context_unmodeled")
+            provenance.append(f"blocker_location:delegatecall_storage_context_unmodeled:{source}:{item.line}:{item.name}")
         for low in re.finditer(r"\b([A-Za-z_]\w*)\s*\.\s*call\s*(?:\{|\()", body):
             receiver = low.group(1)
             lowered = receiver.lower()
@@ -159,6 +162,7 @@ def _bounded_callee_walk(
 
         if re.search(r"(?<![.\w])_dispatchPermit\s*\(", body):
             blockers.append("blocked:signature_authorization_unsupported")
+            provenance.append("blocked:signature_authorization_unsupported")
 
         for match in re.finditer(r"\bsuper\.([A-Za-z_]\w*)\s*\(", body):
             name = match.group(1)
@@ -168,6 +172,7 @@ def _bounded_callee_walk(
             ]
             if not candidates:
                 blockers.append(f"blocked:super_callee_unresolved:{name}:{source}:{item.line}")
+                provenance.append(f"unresolved_path:super.{name}")
             elif len(candidates) > 1:
                 blockers.append(f"blocked:internal_overload_ambiguous:super.{name}:{source}:{item.line}")
             else:
@@ -193,6 +198,8 @@ def _bounded_callee_walk(
         for call in item.external_calls:
             call_text = ".".join(str(part) for part in call) if isinstance(call, (tuple, list)) else str(call)
             lowered = call_text.lower()
+            if call_text and not ("permit2" in lowered or "allowanceholder" in lowered):
+                provenance.append(f"resolved_external_call:{call_text}")
             if "permit2" in lowered or "allowanceholder" in lowered:
                 target = "Permit2" if "permit2" in lowered else "AllowanceHolder"
                 record = f"external_call:{target}"
@@ -260,7 +267,9 @@ def generate_hypothesis_seeds(contracts: tuple[ContractModel, ...] | list[Contra
             observed_writes = tuple(dict.fromkeys((*direct_writes, *transitive_writes)))
             lifecycle = _is_lifecycle_surface(function)
             unresolved = (walk_blocker,) if walk_blocker else ()
-            if not observed_writes and not lifecycle and not unresolved and not effects:
+            if not observed_writes and not lifecycle and not unresolved:
+                # resolved_read / resolved_external_call are measurements, not
+                # evidence of a security-relevant effect and must not seed a candidate.
                 continue
 
             source = function.source or contract.source
