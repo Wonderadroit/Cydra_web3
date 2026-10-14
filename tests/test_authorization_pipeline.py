@@ -3,6 +3,7 @@ from pathlib import Path
 from cydra.authorization_pipeline import investigate_authorization
 from cydra.models import ContractModel, FunctionModel
 from cydra.reasoning import generate_access_control_hypotheses
+from scripts.run_authorization_campaign import _resolve_hypothesis_contract
 
 
 def test_authorization_investigation_is_scoped_to_authorization(tmp_path: Path):
@@ -271,3 +272,7 @@ def test_identical_function_names_have_distinct_source_identity_and_seed_binding
     assert all(item.source_path == str(source.resolve()) for item in matches)
     assert all(item.source_line is not None and item.originating_seed_id for item in matches)
     assert {item["declaring_contract"] for item in result.outcome_records if item["outcome"] == "hypothesis" and item["function_name"] == "setSlasher"} == {"ContractA", "ContractB"}
+    contract_a_hypothesis = next(item for item in matches if item.declaring_contract == "ContractA")
+    selected = _resolve_hypothesis_contract(result, contract_a_hypothesis)
+    assert selected.name == "ContractA"
+    assert next(function for function in selected.functions if function.name == "setSlasher").line == contract_a_hypothesis.source_line
