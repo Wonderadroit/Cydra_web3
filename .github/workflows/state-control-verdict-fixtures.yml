@@ -1,0 +1,30 @@
+name: State-Control Verdict Fixtures
+
+on:
+  push:
+    branches:
+      - "fix/issue-51-state-control-verdict"
+  pull_request:
+    branches:
+      - "fix/issue-51-inherited-authority"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  three-verdict-fixtures:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: foundry-rs/foundry-toolchain@v1
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e .
+      - name: Execute all three generated verdict fixtures
+        env:
+          PYTHONPATH: src
+        run: python scripts/run_state_control_verdict_fixtures.py

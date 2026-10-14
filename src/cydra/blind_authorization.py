@@ -70,6 +70,85 @@ def _source_for_contract(source_text: str, contract_name: str) -> str:
     return source_text[start:]
 
 
+
+# Measured on the pinned DcntEth dependency chain: DcntEth -> OFTV2 -> BaseOFTV2
+# -> OFTCoreV2 -> NonblockingLzApp -> LzApp -> Ownable (6 base hops).
+_AUTHORITY_INHERITANCE_DEPTH_BUDGET = 6
+
+
+def _contract_header(source_text: str, contract_name: str) -> tuple[str, str] | None:
+    """Return a contract's inheritance header and body without resolving unrelated symbols."""
+    match = re.search(
+        rf"\b(?:abstract\s+)?contract\s+{re.escape(contract_name)}\b([^{{]*){{",
+        source_text,
+    )
+    if match is None:
+        return None
+    return match.group(1), _source_for_contract(source_text, contract_name)
+
+
+def _resolve_inherited_ownable_surface(
+    source_path: str | Path,
+    contract_name: str,
+    *,
+    depth_budget: int = _AUTHORITY_INHERITANCE_DEPTH_BUDGET,
+) -> tuple[bool, str, str]:
+    """Find owner() along declared contract bases; this is not a general type resolver."""
+    source_file = Path(source_path).resolve()
+    ancestors = list(source_file.parents)[:5]
+    # Prefer the selected Foundry project root so imported base contracts under
+    # lib/ remain in the bounded source search; do not stop at a crowded src/.
+    search_root = next(
+        (parent for parent in ancestors if (parent / "foundry.toml").is_file()),
+        source_file.parent,
+    )
+    if search_root == source_file.parent:
+        for parent in ancestors:
+            try:
+                if sum(1 for _ in parent.glob("*.sol")) > 1:
+                    search_root = parent
+                    break
+            except OSError:
+                continue
+    source_by_contract: dict[str, str] = {}
+    try:
+        candidates = [p for p in search_root.rglob("*.sol") if p.is_file()]
+    except OSError:
+        candidates = []
+    candidates.append(source_file)
+    for path in candidates:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            continue
+        for match in re.finditer(r"\b(?:abstract\s+)?contract\s+([A-Za-z_$][\w$]*)\b", text):
+            source_by_contract.setdefault(match.group(1), text)
+
+    current, depth = contract_name, 0
+    visited: set[str] = set()
+    while current and current not in visited:
+        visited.add(current)
+        text = source_by_contract.get(current)
+        if text is None:
+            return False, f"authority_inheritance_source_missing:{current}", ""
+        parsed = _contract_header(text, current)
+        if parsed is None:
+            return False, f"authority_inheritance_declaration_missing:{current}", ""
+        header, body = parsed
+        if re.search(r"\bfunction\s+owner\s*\(\s*\)", body) and re.search(
+            r"\bowner\s*\(\s*\)\s*(?:external|public)", body
+        ):
+            return True, "owner_getter_resolved", body
+        bases_match = re.search(r"\bis\s+(.+)$", header, re.DOTALL)
+        bases = [part.strip().split()[0] for part in bases_match.group(1).split(",") if part.strip()] if bases_match else []
+        if not bases:
+            return False, "no_authority_getter", ""
+        if depth >= depth_budget:
+            return False, f"authority_inheritance_depth_exceeded:{depth_budget}", ""
+        current = next((name for name in bases if name in source_by_contract), bases[0])
+        depth += 1
+    return False, "authority_inheritance_cycle_detected", ""
+
 def generate_blind_authorization_test_from_experiment(
     hypothesis: Hypothesis,
     experiment: Experiment,
@@ -128,9 +207,8 @@ def generate_blind_authorization_test_from_experiment(
         if role_match:
             role_getter = role_match.group(1)
 
-    ownable_supported = bool(
-        re.search(r"\bfunction\s+owner\s*\(\s*\)", source_text)
-        and re.search(r"\bowner\s*\(\s*\)\s*(?:external|public)", source_text)
+    ownable_supported, ownable_reason, ownable_source = _resolve_inherited_ownable_surface(
+        contract_model.source, target_type
     )
 
     state_getter = None
@@ -145,6 +223,42 @@ def generate_blind_authorization_test_from_experiment(
             state_getter = written
             break
 
+    # If semantic write extraction missed a simple public state assignment,
+    # recover only a source-declared public scalar that the selected function assigns.
+    if state_getter is None:
+        for match in re.finditer(
+            r"\b(address(?:\s+payable)?|bool|uint\d*|int\d*)\s+public\s+(\w+)\s*;",
+            source_text,
+        ):
+            candidate_type, candidate_name = match.group(1).strip(), match.group(2)
+            if re.search(rf"\b{re.escape(candidate_name)}\s*=", source_text):
+                state_type, state_getter = candidate_type, candidate_name
+                break
+
+    # A bounded sibling comparison distinguishes privileged configuration setters from
+    # permissionless state updates. The inference is recorded explicitly; it is not
+    # applied to arbitrary state changes or newly-created mapping keys.
+    target_is_guarded = bool(re.search(
+        rf"\bfunction\s+{re.escape(function.name)}\s*\([^)]*\)[^{{;]*\bonlyOwner\b",
+        source_text,
+        re.DOTALL,
+    ))
+    guarded_configuration_sibling = any(
+        match.group(1) != function.name
+        for match in re.finditer(
+            r"\bfunction\s+([A-Za-z_$][\w$]*)\s*\([^)]*\)[^{;]*\bonlyOwner\b[^{{;]*\{",
+            source_text,
+            re.DOTALL,
+        )
+    )
+    authority_model_governs_state = bool(
+        ownable_supported
+        and state_getter
+        and function.name.startswith("set")
+        and not target_is_guarded
+        and guarded_configuration_sibling
+    )
+
     # Only a single source-grounded revert string is accepted as a guard oracle.
     guard_strings = set(re.findall(
         r"(?:require|revert)\s*\([^;]*?[\"']([^\"']{3,})[\"']",
@@ -157,13 +271,47 @@ def generate_blind_authorization_test_from_experiment(
         if expected_guard else '""'
     )
 
+    # Record observations independently of the authority resolver's verdict branch.
+    # Low-level reads let the artifact preserve whatever is measurable even when
+    # source resolution fails; decode only successful, correctly-sized returns.
+    observation_declarations = [
+        "    address public observedCaller;",
+        "    address public observedOwnerBefore;",
+        "    address public observedOwnerAfter;",
+        "    bool public ownerReadBeforeSucceeded;",
+        "    bool public ownerReadAfterSucceeded;",
+        "    string public observedStateVariable;",
+        "    bool public observedStateExistedBefore;",
+        "    bool public observedAuthorityModelGovernsState;",
+        "    bool public observedStateChanged;",
+        "    bool public stateReadBeforeSucceeded;",
+        "    bool public stateReadAfterSucceeded;",
+    ]
+    if state_getter:
+        observation_declarations += [
+            f"    {state_type} public observedStateBefore;",
+            f"    {state_type} public observedStateAfter;",
+        ]
+    before_observation = """        observedCaller = address(attacker);
+        (bool ownerBeforeOk, bytes memory ownerBeforeData) = address(target).staticcall(abi.encodeWithSignature("owner()"));
+        ownerReadBeforeSucceeded = ownerBeforeOk && ownerBeforeData.length >= 32;
+        if (ownerReadBeforeSucceeded) observedOwnerBefore = abi.decode(ownerBeforeData, (address));"""
+    post_observation = """        (bool ownerAfterOk, bytes memory ownerAfterData) = address(target).staticcall(abi.encodeWithSignature("owner()"));
+        ownerReadAfterSucceeded = ownerAfterOk && ownerAfterData.length >= 32;
+        if (ownerReadAfterSucceeded) observedOwnerAfter = abi.decode(ownerAfterData, (address));"""
+    if state_getter:
+        before_observation += f'''
+        (bool stateBeforeOk, bytes memory stateBeforeData) = address(target).staticcall(abi.encodeWithSignature("{state_getter}()"));
+        stateReadBeforeSucceeded = stateBeforeOk && stateBeforeData.length >= 32;
+        if (stateReadBeforeSucceeded) observedStateBefore = abi.decode(stateBeforeData, ({state_type}));'''
+        post_observation += f'''
+        (bool stateAfterOk, bytes memory stateAfterData) = address(target).staticcall(abi.encodeWithSignature("{state_getter}()"));
+        stateReadAfterSucceeded = stateAfterOk && stateAfterData.length >= 32;
+        if (stateReadAfterSucceeded) observedStateAfter = abi.decode(stateAfterData, ({state_type}));
+        observedStateChanged = stateReadBeforeSucceeded && stateReadAfterSucceeded && (observedStateBefore != observedStateAfter);'''
     if role_getter:
-        before_observation = (
-            f"        bool hadRoleBefore = target.hasRole(target.{role_getter}(), address(attacker));"
-        )
-        post_observation = (
-            f"        bool hasRoleAfter = target.hasRole(target.{role_getter}(), address(attacker));"
-        )
+        before_observation += "\n        bool hadRoleBefore = target.hasRole(target." + role_getter + "(), address(attacker));"
+        post_observation += "\n        bool hasRoleAfter = target.hasRole(target." + role_getter + "(), address(attacker));"
         verdict_logic = f'''        if (!ok) {{
             if (hadRoleBefore != hasRoleAfter) verdict = Verdict.Inconclusive;
             else if (bytes(expectedGuard).length == 0) verdict = Verdict.Unmeasurable;
@@ -173,21 +321,61 @@ def generate_blind_authorization_test_from_experiment(
         else if (hadRoleBefore == hasRoleAfter) verdict = Verdict.Rejected;
         else verdict = Verdict.Inconclusive;'''
     elif ownable_supported:
-        before_observation = "        address ownerBefore = target.owner();"
-        post_observation = "        address ownerAfter = target.owner();"
-        verdict_logic = f'''        if (!ok) {{
-            if (ownerBefore != ownerAfter) verdict = Verdict.Inconclusive;
-            else if (expectedGuard.length == 0) verdict = Verdict.Unmeasurable;
-            else if (keccak256(bytes(_revertReason(returnData))) == keccak256(bytes(expectedGuard))) verdict = Verdict.Rejected;
-            else verdict = Verdict.Inconclusive;
-        }} else if (ownerBefore != address(attacker) && ownerAfter == address(attacker)) verdict = Verdict.Supported;
-        else if (ownerBefore == ownerAfter) verdict = Verdict.Rejected;
-        else verdict = Verdict.Inconclusive;'''
+        verdict_logic = f'''        if (!ownerReadBeforeSucceeded || !ownerReadAfterSucceeded) {{
+            verdict = Verdict.Unmeasurable;
+            verdictReason = "owner_measurement_unavailable";
+        }} else if (observedOwnerBefore == address(attacker)) {{
+            verdict = Verdict.Rejected;
+            verdictReason = "caller_authorized";
+        }} else if (!ok) {{
+            if ({str(target_is_guarded).lower()}) {{
+                verdict = Verdict.Rejected;
+                verdictReason = "guarded_function_reverted";
+            }} else if (observedOwnerBefore != observedOwnerAfter) {{
+                verdict = Verdict.Inconclusive;
+                verdictReason = "authority_changed_during_reverted_call";
+            }} else if (bytes(expectedGuard).length != 0 && keccak256(bytes(_revertReason(returnData))) == keccak256(bytes(expectedGuard))) {{
+                verdict = Verdict.Rejected;
+                verdictReason = "unauthorized_call_reverted";
+            }} else {{
+                verdict = Verdict.Inconclusive;
+                verdictReason = "revert_reason_not_discriminating";
+            }}
+        }} else if (!stateReadBeforeSucceeded || !stateReadAfterSucceeded) {{
+            verdict = Verdict.Unmeasurable;
+            verdictReason = "protected_state_measurement_unavailable";
+        }} else if (!observedStateExistedBefore) {{
+            verdict = Verdict.Unmeasurable;
+            verdictReason = "state_not_preexisting";
+        }} else if (!observedAuthorityModelGovernsState) {{
+            verdict = Verdict.Rejected;
+            verdictReason = "authority_model_not_derived_for_state";
+        }} else if (observedStateChanged) {{
+            verdict = Verdict.Supported;
+            verdictReason = "unauthorized_preexisting_authority_governed_state_changed";
+        }} else {{
+            verdict = Verdict.Rejected;
+            verdictReason = "protected_state_unchanged";
+        }}'''
     else:
-        # A public state getter is not itself proof of an authority relationship.
-        before_observation = ""
-        post_observation = ""
-        verdict_logic = '        verdict = Verdict.Unmeasurable; verdictReason = "no_authority_getter";'
+        verdict_logic = f'        verdict = Verdict.Unmeasurable; verdictReason = "{ownable_reason}";'
+
+    observation_logging = ""
+    if state_getter:
+        if state_type == "bool":
+            state_log_type, state_before_value, state_after_value = "bool", "observedStateBefore", "observedStateAfter"
+        elif state_type.startswith(("uint", "int")):
+            state_log_type, state_before_value, state_after_value = "uint256", "uint256(observedStateBefore)", "uint256(observedStateAfter)"
+        else:
+            state_log_type, state_before_value, state_after_value = "address", "observedStateBefore", "observedStateAfter"
+        observation_logging = (
+            f'        (bool stateBeforeLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,{state_log_type})", "CYDRA_OBS_STATE_BEFORE", {state_before_value}));\n'
+            f'        stateBeforeLogged;\n'
+            f'        (bool stateAfterLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,{state_log_type})", "CYDRA_OBS_STATE_AFTER", {state_after_value}));\n'
+            f'        stateAfterLogged;'
+        )
+
+    observation_declarations = "\n".join(observation_declarations)
 
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -213,6 +401,7 @@ contract CydraBlindAuthorizationTest {{
     bool public deployed;
     string internal expectedGuard = {guard_literal};
     string public verdictReason;
+{observation_declarations}
 
     function _targetCreationCode() internal pure returns (bytes memory) {{
         return type({target_type}).creationCode;
@@ -228,6 +417,25 @@ contract CydraBlindAuthorizationTest {{
             abi.encodeWithSignature("log(string,string)", "CYDRA_VERDICT_REASON", verdictReason)
         );
         reasonLogged;
+        (bool callerLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,address)", "CYDRA_OBS_CALLER", observedCaller));
+        callerLogged;
+        (bool ownerBeforeLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,address)", "CYDRA_OBS_OWNER_BEFORE", observedOwnerBefore));
+        ownerBeforeLogged;
+        (bool ownerAfterLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,address)", "CYDRA_OBS_OWNER_AFTER", observedOwnerAfter));
+        ownerAfterLogged;
+        (bool ownerBeforeOkLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_OWNER_BEFORE_READ_OK", ownerReadBeforeSucceeded));
+        ownerBeforeOkLogged;
+        (bool ownerAfterOkLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_OWNER_AFTER_READ_OK", ownerReadAfterSucceeded));
+        ownerAfterOkLogged;
+        (bool stateNameLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,string)", "CYDRA_OBS_STATE_VARIABLE", observedStateVariable));
+        stateNameLogged;
+        (bool stateExistsLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_STATE_EXISTED_BEFORE", observedStateExistedBefore));
+        stateExistsLogged;
+        (bool stateGovernedLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_AUTHORITY_MODEL_GOVERNS_STATE", observedAuthorityModelGovernsState));
+        stateGovernedLogged;
+        (bool stateChangedLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_STATE_CHANGED", observedStateChanged));
+        stateChangedLogged;
+{observation_logging}
     }}
 
     function _revertReason(bytes memory data) internal pure returns (string memory) {{
@@ -250,6 +458,9 @@ contract CydraBlindAuthorizationTest {{
         }}
         target = {target_type}(payable(deployedAddress));
         attacker = new CydraUnauthorizedCaller();
+        observedStateVariable = "{state_getter or ""}";
+        observedStateExistedBefore = {str(bool(state_getter)).lower()};
+        observedAuthorityModelGovernsState = {str(authority_model_governs_state).lower()};
         deployed = true;
     }}
 
@@ -269,6 +480,8 @@ contract CydraBlindAuthorizationTest {{
 {post_observation}
 {verdict_logic}
         if (verdict == Verdict.Inconclusive && bytes(verdictReason).length == 0) verdictReason = "runtime_outcome_not_discriminating";
+        if (verdict == Verdict.Rejected && bytes(verdictReason).length == 0) verdictReason = "authority_membership_or_state_control_not_violated";
+        if (verdict == Verdict.Supported && bytes(verdictReason).length == 0) verdictReason = "authority_membership_gained";
         assert(verdict != Verdict.None);
         _recordVerdict();
     }}
