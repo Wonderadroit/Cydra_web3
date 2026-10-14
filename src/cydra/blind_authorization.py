@@ -325,10 +325,7 @@ def generate_blind_authorization_test_from_experiment(
             verdict = Verdict.Rejected;
             verdictReason = "caller_authorized";
         }} else if (!ok) {{
-            if ({str(false).lower()} && observedOwnerBefore != observedOwnerAfter) {{
-                verdict = Verdict.Inconclusive;
-                verdictReason = "authority_changed_during_reverted_call";
-            }} else if ({str(false).lower()}) {{
+            if ({str(target_is_guarded).lower()}) {{
                 verdict = Verdict.Rejected;
                 verdictReason = "guarded_function_reverted";
             }} else if (observedOwnerBefore != observedOwnerAfter) {{
