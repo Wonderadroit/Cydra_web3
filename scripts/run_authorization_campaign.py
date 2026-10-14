@@ -770,7 +770,34 @@ def main() -> int:
                 target_function=hypothesis.target_function,
                 planned_inputs=planned_experiment.planned_inputs,
             )
-            contract = _resolve_hypothesis_contract(result, hypothesis)
+            try:
+                contract = _resolve_hypothesis_contract(result, hypothesis)
+            except ValueError as exc:
+                # Preserve this candidate's failure and continue measuring the collection.
+                candidate_payload = {
+                    "candidate_identity": {
+                        "source_path": hypothesis.source_path,
+                        "declaring_contract": hypothesis.declaring_contract,
+                        "target_function": hypothesis.target_function,
+                        "source_line": hypothesis.source_line,
+                    },
+                    "hypothesis": _json(hypothesis),
+                    "classification": "candidate_resolution_failed",
+                    "verdict": "UNMEASURABLE",
+                    "verdict_reason": str(exc),
+                    "finding_gate": "NOT_READY",
+                    "blind_execution": {
+                        "executed": False,
+                        "status": "UNMEASURABLE",
+                        "stderr": str(exc),
+                    },
+                }
+                candidate_results.append(candidate_payload)
+                persist_collection()
+                print(f"{hypothesis.hypothesis_id}: candidate resolution failed; recorded and continuing: {exc}")
+                if campaign_mode == "targeted":
+                    break
+                continue
             output = test_path_for(
                 execution_project, f"generated/{hypothesis.hypothesis_id}.t.sol"
             )
