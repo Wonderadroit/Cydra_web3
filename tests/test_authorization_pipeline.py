@@ -333,3 +333,75 @@ def test_child_override_wins_in_effective_inherited_surface(tmp_path: Path):
     assert len(execute) == 1
     assert Path(execute[0].source).name == "Child.sol"
     assert execute[0].line == 4
+
+
+def test_inherited_callable_keeps_declaring_contract_identity_and_is_not_promoted(tmp_path: Path):
+    from cydra.authorization_pipeline import investigate_authorization
+    from cydra.solidity_model import parse_solidity
+
+    base = tmp_path / "LzApp.sol"
+    child = tmp_path / "DcntEth.sol"
+    base.write_text(
+        "pragma solidity ^0.8.20;\n"
+        "abstract contract LzApp {\n"
+        "  address public trustedRemote;\n"
+        "  function setTrustedRemote(address next) public virtual { trustedRemote = next; }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    child.write_text(
+        'pragma solidity ^0.8.20;\nimport "./LzApp.sol";\n'
+        "contract DcntEth is LzApp {\n"
+        "  address public router;\n"
+        "  function setRouter(address next) external { router = next; }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    model = next(item for item in parse_solidity(child) if item.name == "DcntEth")
+    inherited = next(item for item in model.functions if item.name == "setTrustedRemote")
+    assert Path(inherited.source).name == "LzApp.sol"
+    assert inherited.declaring_contract == "LzApp"
+    assert inherited.line == 4
+    assert inherited.body_scope == "out_of_scope"
+
+    result = investigate_authorization(child)
+    assert not any(h.target_function == "setTrustedRemote" for h in result.hypotheses)
+    blocked = next(seed for seed in result.seeds if seed.target_function == "setTrustedRemote")
+    assert blocked.status == "blocked"
+    assert blocked.target_contract == "LzApp"
+    assert Path(blocked.source).name == "LzApp.sol"
+
+
+def test_targeted_candidate_selection_excludes_other_inherited_candidates():
+    from scripts.run_authorization_campaign import _select_hypotheses
+    from cydra.models import Hypothesis
+
+    requested = Hypothesis(
+        hypothesis_id="H-DIRECT",
+        claim="direct candidate",
+        invariant_id="INV-AUTH-001",
+        target_function="setRouter",
+        attacker_capability="external caller",
+        expected_impact="router change",
+        source_path="/repo/src/DcntEth.sol",
+        declaring_contract="DcntEth",
+        source_line=20,
+    )
+    inherited = Hypothesis(
+        hypothesis_id="H-INHERITED",
+        claim="inherited candidate",
+        invariant_id="INV-AUTH-001",
+        target_function="setTrustedRemote",
+        attacker_capability="external caller",
+        expected_impact="remote change",
+        source_path="/repo/src/LzApp.sol",
+        declaring_contract="LzApp",
+        source_line=138,
+    )
+    selected = _select_hypotheses(
+        (requested, inherited),
+        "/repo/src/DcntEth.sol::DcntEth::setRouter::20",
+        target_path="src/DcntEth.sol",
+    )
+    assert [item.hypothesis_id for item in selected] == ["H-DIRECT"]
