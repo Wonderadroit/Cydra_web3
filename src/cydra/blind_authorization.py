@@ -96,7 +96,7 @@ def _resolve_inherited_ownable_surface(
     search_root = source_file.parent
     for parent in list(source_file.parents)[:5]:
         try:
-            if sum(1 for _ in parent.rglob("*.sol")) > 1:
+            if sum(1 for _ in parent.glob("*.sol")) > 1:
                 search_root = parent
                 break
         except OSError:
