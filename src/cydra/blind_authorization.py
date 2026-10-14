@@ -281,6 +281,8 @@ def generate_blind_authorization_test_from_experiment(
         stateReadAfterSucceeded = stateAfterOk && stateAfterData.length >= 32;
         if (stateReadAfterSucceeded) observedStateAfter = abi.decode(stateAfterData, ({state_type}));'''
     if role_getter:
+        before_observation += f"\\n        bool hadRoleBefore = target.hasRole(target.{role_getter}(), address(attacker));"
+        post_observation += f"\\n        bool hasRoleAfter = target.hasRole(target.{role_getter}(), address(attacker));"
         verdict_logic = f'''        if (!ok) {{
             if (hadRoleBefore != hasRoleAfter) verdict = Verdict.Inconclusive;
             else if (bytes(expectedGuard).length == 0) verdict = Verdict.Unmeasurable;
