@@ -20,7 +20,11 @@ FIXTURES = (
         "parameter": ParameterModel(name="nextRouter", type="address"),
         "expected_verdict": 1,
         "expected_reason": "unauthorized_preexisting_authority_governed_state_changed",
+        "expected_state_variable": "router",
+        "expected_state_declared": "true",
         "expected_state_exists": "true",
+        "expected_state_existence_measured": "true",
+        "expected_state_measurement_available": "true",
         "expected_state_governed": "true",
     },
     {
@@ -32,7 +36,11 @@ FIXTURES = (
         "parameter": None,
         "expected_verdict": 4,
         "expected_reason": "no_authority_getter",
+        "expected_state_variable": "_isTransferGuard",
+        "expected_state_declared": "true",
         "expected_state_exists": "false",
+        "expected_state_existence_measured": "true",
+        "expected_state_measurement_available": "false",
         "expected_state_governed": "false",
     },
     {
@@ -44,7 +52,11 @@ FIXTURES = (
         "parameter": ParameterModel(name="nextRouter", type="address"),
         "expected_verdict": 2,
         "expected_reason": "guarded_function_reverted",
+        "expected_state_variable": "router",
+        "expected_state_declared": "true",
         "expected_state_exists": "true",
+        "expected_state_existence_measured": "true",
+        "expected_state_measurement_available": "true",
         "expected_state_governed": "false",
     },
 )
@@ -132,7 +144,11 @@ def _run_fixture(fixture: dict) -> None:
         expected_markers = (
             f"CYDRA_VERDICT {fixture['expected_verdict']}",
             f"CYDRA_VERDICT_REASON {fixture['expected_reason']}",
+            f"CYDRA_OBS_STATE_VARIABLE {fixture['expected_state_variable']}",
+            f"CYDRA_OBS_STATE_VARIABLE_DECLARED {fixture['expected_state_declared']}",
             f"CYDRA_OBS_STATE_EXISTED_BEFORE {fixture['expected_state_exists']}",
+            f"CYDRA_OBS_STATE_EXISTENCE_MEASURED {fixture['expected_state_existence_measured']}",
+            f"CYDRA_OBS_STATE_MEASUREMENT_AVAILABLE {fixture['expected_state_measurement_available']}",
             f"CYDRA_OBS_AUTHORITY_MODEL_GOVERNS_STATE {fixture['expected_state_governed']}",
         )
         missing = [marker for marker in expected_markers if marker not in output]

@@ -259,6 +259,37 @@ def generate_blind_authorization_test_from_experiment(
         and guarded_configuration_sibling
     )
 
+    # Name the source state variable even when its location cannot be read at runtime.
+    state_variable_name = state_getter or next(iter(function.writes), "")
+    state_variable_declared = bool(
+        state_variable_name
+        and (
+            re.search(
+                rf"\bmapping\s*\([^;]*\)\s*(?:(?:public|private|internal)\s+)?{re.escape(state_variable_name)}\b",
+                source_text,
+            )
+            or re.search(
+                rf"\b(address(?:\s+payable)?|bool|uint\d*|int\d*)\s+(?:public|private|internal)\s+{re.escape(state_variable_name)}\s*;",
+                source_text,
+            )
+        )
+    )
+    fresh_mapping_key = False
+    if state_variable_name and not state_getter:
+        fresh_key_match = re.search(
+            r"\b([A-Za-z_$][\w$]*)\s*=\s*address\s*\(\s*new\s+[A-Za-z_$][\w$]*",
+            source_text,
+        )
+        if fresh_key_match:
+            fresh_key = fresh_key_match.group(1)
+            fresh_mapping_key = bool(re.search(
+                rf"\b{re.escape(state_variable_name)}\s*\[\s*{re.escape(fresh_key)}\s*\]\s*=",
+                source_text,
+            ))
+    state_existence_measured = bool(state_getter or fresh_mapping_key)
+    state_existed_before = bool(state_getter and state_variable_declared)
+    state_measurement_available = bool(state_getter)
+
     # Only a single source-grounded revert string is accepted as a guard oracle.
     guard_strings = set(re.findall(
         r"(?:require|revert)\s*\([^;]*?[\"']([^\"']{3,})[\"']",
@@ -281,7 +312,10 @@ def generate_blind_authorization_test_from_experiment(
         "    bool public ownerReadBeforeSucceeded;",
         "    bool public ownerReadAfterSucceeded;",
         "    string public observedStateVariable;",
+        "    bool public observedStateVariableDeclared;",
         "    bool public observedStateExistedBefore;",
+        "    bool public observedStateExistenceMeasured;",
+        "    bool public stateMeasurementAvailable;",
         "    bool public observedAuthorityModelGovernsState;",
         "    bool public observedStateChanged;",
         "    bool public stateReadBeforeSucceeded;",
@@ -407,6 +441,19 @@ contract CydraBlindAuthorizationTest {{
         return type({target_type}).creationCode;
     }}
 
+    function _recordStateMetadata(address consoleAddress) internal {{
+        (bool stateNameLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,string)", "CYDRA_OBS_STATE_VARIABLE", observedStateVariable));
+        stateNameLogged;
+        (bool stateDeclaredLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_STATE_VARIABLE_DECLARED", observedStateVariableDeclared));
+        stateDeclaredLogged;
+        (bool stateExistsLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_STATE_EXISTED_BEFORE", observedStateExistedBefore));
+        stateExistsLogged;
+        (bool stateExistenceMeasuredLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_STATE_EXISTENCE_MEASURED", observedStateExistenceMeasured));
+        stateExistenceMeasuredLogged;
+        (bool stateMeasurementAvailableLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_STATE_MEASUREMENT_AVAILABLE", stateMeasurementAvailable));
+        stateMeasurementAvailableLogged;
+    }}
+
     function _recordVerdict() internal {{
         address consoleAddress = address(uint160(0x00000000000000000000636f6e736f6c652e6c6f67));
         (bool logged,) = consoleAddress.staticcall(
@@ -427,10 +474,7 @@ contract CydraBlindAuthorizationTest {{
         ownerBeforeOkLogged;
         (bool ownerAfterOkLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_OWNER_AFTER_READ_OK", ownerReadAfterSucceeded));
         ownerAfterOkLogged;
-        (bool stateNameLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,string)", "CYDRA_OBS_STATE_VARIABLE", observedStateVariable));
-        stateNameLogged;
-        (bool stateExistsLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_STATE_EXISTED_BEFORE", observedStateExistedBefore));
-        stateExistsLogged;
+        _recordStateMetadata(consoleAddress);
         (bool stateGovernedLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_AUTHORITY_MODEL_GOVERNS_STATE", observedAuthorityModelGovernsState));
         stateGovernedLogged;
         (bool stateChangedLogged,) = consoleAddress.staticcall(abi.encodeWithSignature("log(string,bool)", "CYDRA_OBS_STATE_CHANGED", observedStateChanged));
@@ -458,8 +502,11 @@ contract CydraBlindAuthorizationTest {{
         }}
         target = {target_type}(payable(deployedAddress));
         attacker = new CydraUnauthorizedCaller();
-        observedStateVariable = "{state_getter or ""}";
-        observedStateExistedBefore = {str(bool(state_getter)).lower()};
+        observedStateVariable = "{state_variable_name}";
+        observedStateVariableDeclared = {str(state_variable_declared).lower()};
+        observedStateExistedBefore = {str(state_existed_before).lower()};
+        observedStateExistenceMeasured = {str(state_existence_measured).lower()};
+        stateMeasurementAvailable = {str(state_measurement_available).lower()};
         observedAuthorityModelGovernsState = {str(authority_model_governs_state).lower()};
         deployed = true;
     }}
