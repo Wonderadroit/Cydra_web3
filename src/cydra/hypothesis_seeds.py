@@ -169,7 +169,17 @@ def generate_hypothesis_seeds(contracts: tuple[ContractModel, ...] | list[Contra
                 continue
 
             source = function.source or contract.source
-            if lifecycle:
+            if function.body_scope == "out_of_scope":
+                question = f"Can a caller outside the evidenced trust boundary trigger security-relevant effects through inherited {function.name}?"
+                invariant = "Execution with security-relevant effects must be restricted to actors authorized by the target's evidenced trust boundary."
+                invariant_source: InvariantSource = "generic"
+                prerequisites = ("analyze_inherited_body", "intended_authorization_boundary", "deployment_or_local_fork")
+                status: SeedStatus = "blocked"
+                uncertainty = (
+                    "inherited body is retained as surface context but is outside the analyzed source scope",
+                    "the effective authorization boundary and runtime reachability are not established",
+                )
+            elif lifecycle:
                 writes = ", ".join(observed_writes) if observed_writes else "lifecycle-sensitive state"
                 question = f"Can a caller outside the intended trust boundary change {writes} through {function.name} in a reachable deployment state?"
                 invariant = f"Only an actor authorized by the evidenced trust boundary may change security-relevant state ({writes})."
@@ -207,8 +217,8 @@ def generate_hypothesis_seeds(contracts: tuple[ContractModel, ...] | list[Contra
                 )
 
             seeds.append(HypothesisSeed(
-                seed_id=f"SEED-AUTH-{contract.name}-{function.name}-{function.line}",
-                target_contract=contract.name,
+                seed_id=f"SEED-AUTH-{function.declaring_contract or contract.name}-{function.name}-{function.line}",
+                target_contract=function.declaring_contract or contract.name,
                 target_function=function.name,
                 question=question,
                 invariant=invariant,
