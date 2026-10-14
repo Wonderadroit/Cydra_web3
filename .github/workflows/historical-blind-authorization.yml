@@ -5,6 +5,7 @@ on:
     branches:
       - "validation/historical-blind-access-control"
       - "fix/structural-modifier-classification"
+      - "fix/issue-47-integration"
 
 permissions:
   contents: read
