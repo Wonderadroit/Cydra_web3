@@ -1,0 +1,111 @@
+name: Temporary Symbiotic Candidate Collection Validation
+
+on:
+  push:
+    branches:
+      - fix/candidate-collection-modes
+
+permissions:
+  contents: read
+
+jobs:
+  run-both-campaign-modes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: foundry-rs/foundry-toolchain@v1
+      - run: python -m pip install --upgrade pip pytest
+      - run: python -m pip install -e .
+      - name: Record pinned target intake
+        run: |
+          {
+            echo "Program scope URL: https://github.com/sherlock-audit/2025-06-symbiotic-relay"
+            echo "Target repository: https://github.com/sherlock-audit/2025-06-symbiotic-relay"
+            echo "Target revision: 435a21fd81bcd588439feef3108580f535b9e5eb"
+            echo "Target source path: middleware-sdk/lib/core/src/contracts/vault/Vault.sol"
+            echo "Target project path: middleware-sdk"
+            echo "Execution: local source checkout and isolated Foundry tests only"
+            echo "External transactions: not performed"
+          } | tee "$RUNNER_TEMP/target-intake.txt"
+      - name: Run blind all-candidates campaign
+        id: blind
+        env:
+          PYTHONPATH: src
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+          python scripts/run_authorization_campaign.py \
+            --target-repo "https://github.com/sherlock-audit/2025-06-symbiotic-relay" \
+            --target-ref "435a21fd81bcd588439feef3108580f535b9e5eb" \
+            --target-path "middleware-sdk/lib/core/src/contracts/vault/Vault.sol" \
+            --target-project "middleware-sdk" \
+            --mode blind \
+            --require-ready \
+            --output "$RUNNER_TEMP/authorization-campaign-blind.json" \
+            2>&1 | tee "$RUNNER_TEMP/authorization-campaign-blind.log"
+          status=${PIPESTATUS[0]}
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          echo "Blind campaign process exit code: $status"
+          exit 0
+      - name: Run targeted setSlasher identity validation
+        id: targeted
+        env:
+          PYTHONPATH: src
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+          python scripts/run_authorization_campaign.py \
+            --target-repo "https://github.com/sherlock-audit/2025-06-symbiotic-relay" \
+            --target-ref "435a21fd81bcd588439feef3108580f535b9e5eb" \
+            --target-path "middleware-sdk/lib/core/src/contracts/vault/Vault.sol" \
+            --target-project "middleware-sdk" \
+            --mode targeted \
+            --requested-candidate "Vault.sol::Vault::setSlasher::354" \
+            --require-ready \
+            --output "$RUNNER_TEMP/authorization-campaign-targeted.json" \
+            2>&1 | tee "$RUNNER_TEMP/authorization-campaign-targeted.log"
+          status=${PIPESTATUS[0]}
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          echo "Targeted campaign process exit code: $status"
+          exit 0
+      - name: Upload blind collection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cydra-symbiotic-blind-candidate-collection
+          path: |
+            ${{ runner.temp }}/target-intake.txt
+            ${{ runner.temp }}/authorization-campaign-blind.json
+            ${{ runner.temp }}/authorization-campaign-blind.log
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload targeted identity result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cydra-symbiotic-targeted-setSlasher
+          path: |
+            ${{ runner.temp }}/target-intake.txt
+            ${{ runner.temp }}/authorization-campaign-targeted.json
+            ${{ runner.temp }}/authorization-campaign-targeted.log
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Summarize measurement status
+        if: always()
+        env:
+          BLIND_EXIT: ${{ steps.blind.outputs.exit_code }}
+          TARGETED_EXIT: ${{ steps.targeted.outputs.exit_code }}
+        run: |
+          {
+            echo "## Symbiotic candidate validation"
+            echo "- Blind all-candidates process exit: $BLIND_EXIT"
+            echo "- Targeted setSlasher process exit: $TARGETED_EXIT"
+            echo "- Process exit codes are not vulnerability verdicts."
+            echo "- Inspect the two JSON artifacts for per-candidate outcomes and identity attribution."
+          } >> "$GITHUB_STEP_SUMMARY"
