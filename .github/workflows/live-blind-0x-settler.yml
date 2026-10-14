@@ -1,0 +1,68 @@
+name: Live Blind Authorization — 0x Settler
+
+on:
+  push:
+    branches:
+      - "campaign/live-blind-0x-settler"
+
+permissions:
+  contents: read
+
+jobs:
+  blind-authorization-campaign:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: foundry-rs/foundry-toolchain@v1
+      - run: python -m pip install --upgrade pip pytest
+      - run: python -m pip install -e .
+      - name: Record scope and immutable target intake
+        run: |
+          {
+            echo "Program scope URL: https://immunefi.com/bug-bounty/0x/scope/"
+            echo "Target repository: https://github.com/0xProject/0x-settler"
+            echo "Target revision: 3bda07a47858031165f28393dffb4a72aa861e56"
+            echo "Target source path: src/Settler.sol"
+            echo "Target project path: ."
+            echo "Scope basis: 0x Settler is explicitly listed in the live 0x Immunefi scope."
+            echo "Execution: local source checkout and isolated Foundry tests only"
+            echo "External transactions: not performed by this workflow"
+            echo "Blindness boundary: no expected function name or expected vulnerability class is passed to the campaign command."
+          } | tee "$RUNNER_TEMP/target-intake.txt"
+      - name: Validate campaign intake format
+        run: |
+          python scripts/validate_campaign_intake.py \
+            --program-url "https://immunefi.com/bug-bounty/0x/scope/" \
+            --target-repo "https://github.com/0xProject/0x-settler" \
+            --target-ref "3bda07a47858031165f28393dffb4a72aa861e56" \
+            --target-path "src/Settler.sol" \
+            --target-project "."
+      - name: Run blind authorization campaign
+        env:
+          PYTHONPATH: src
+        run: |
+          set -o pipefail
+          python scripts/run_authorization_campaign.py \
+            --target-repo "https://github.com/0xProject/0x-settler.git" \
+            --target-ref "3bda07a47858031165f28393dffb4a72aa861e56" \
+            --target-path "src/Settler.sol" \
+            --target-project "." \
+            --mode blind \
+            --require-ready \
+            --output "$RUNNER_TEMP/authorization-campaign.json" \
+            2>&1 | tee "$RUNNER_TEMP/authorization-campaign.log"
+      - name: Upload blind campaign evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cydra-live-blind-0x-settler
+          path: |
+            ${{ runner.temp }}/target-intake.txt
+            ${{ runner.temp }}/authorization-campaign.json
+            ${{ runner.temp }}/authorization-campaign.log
+          if-no-files-found: warn
+          retention-days: 14
