@@ -94,7 +94,7 @@ def test_inherited_effect_path_is_evaluated_once(tmp_path: Path):
     )
     inherited = FunctionModel(
         "execute", "public", (), (), (), 1, source=str(source),
-        declaring_contract="Base", body_scope="in_scope",
+        body_scope="in_scope",
     )
     contract = ContractModel("Child", str(source), (), inherited_functions=(inherited,))
     seeds = generate_hypothesis_seeds((contract,))
@@ -111,11 +111,11 @@ def test_direct_declaration_wins_over_same_inherited_signature(tmp_path: Path):
     )
     direct = FunctionModel(
         "setValue", "external", (), ("value",), (), 1,
-        parameters=(), source=str(source), declaring_contract="Child",
+        parameters=(), source=str(source),
     )
     inherited = FunctionModel(
         "setValue", "external", (), (), (), 10,
-        parameters=(), source=str(tmp_path / "Base.sol"), declaring_contract="Base",
+        parameters=(), source=str(tmp_path / "Base.sol"),
     )
     contract = ContractModel(
         "Child", str(source), (direct,), state_variables=("value",),
@@ -139,11 +139,11 @@ def test_nearest_inherited_declaration_wins_over_distant_ancestor(tmp_path: Path
     )
     nearest = FunctionModel(
         "setValue", "external", (), ("value",), (), 5,
-        parameters=(), source=str(nearest_source), declaring_contract="Parent",
+        parameters=(), source=str(nearest_source),
     )
     distant = FunctionModel(
         "setValue", "external", (), (), (), 8,
-        parameters=(), source=str(distant_source), declaring_contract="Grandparent",
+        parameters=(), source=str(distant_source),
     )
     contract = ContractModel(
         "Child", str(nearest_source), (), state_variables=("value",),
