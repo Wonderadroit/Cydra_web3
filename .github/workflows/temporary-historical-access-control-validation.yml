@@ -1,0 +1,65 @@
+name: Temporary historical access-control measurement validation
+
+on:
+  push:
+    branches:
+      - fix/candidate-collection-modes
+
+permissions:
+  contents: read
+
+jobs:
+  targeted-historical-access-control:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: foundry-rs/foundry-toolchain@v1
+      - run: python -m pip install --upgrade pip pytest
+      - run: python -m pip install -e .
+      - name: Record pinned historical benchmark
+        run: |
+          {
+            echo "Benchmark: Code4rena 2024-01 Decent Bridge"
+            echo "Finding: DcntEth.setRouter missing access control"
+            echo "Report: https://github.com/code-423n4/2024-01-decent-findings/issues/741"
+            echo "Target repository: https://github.com/decentxyz/decent-bridge"
+            echo "Target revision: 7f90fd4489551b69c20d11eeecb17a3f564afb18"
+            echo "Target source: src/DcntEth.sol"
+            echo "Candidate: src/DcntEth.sol::DcntEth::setRouter::20"
+            echo "Mode: targeted; measurement-only; no external transactions"
+          } | tee "$RUNNER_TEMP/benchmark-intake.txt"
+      - name: Run regression suite
+        run: python -m pytest -q
+      - name: Run targeted authorization measurement
+        env:
+          PYTHONPATH: src
+        run: |
+          set +e
+          python scripts/run_authorization_campaign.py \
+            --target-repo https://github.com/decentxyz/decent-bridge \
+            --target-ref 7f90fd4489551b69c20d11eeecb17a3f564afb18 \
+            --target-path src/DcntEth.sol \
+            --target-project . \
+            --mode targeted \
+            --requested-candidate src/DcntEth.sol::DcntEth::setRouter::20 \
+            --measurement-only \
+            --output "$RUNNER_TEMP/historical-access-control-campaign.json" \
+            2>&1 | tee "$RUNNER_TEMP/historical-access-control-campaign.log"
+          status=${PIPESTATUS[0]}
+          echo "CAMPAIGN_EXIT_CODE=$status" | tee -a "$RUNNER_TEMP/historical-access-control-campaign.log"
+          exit 0
+      - name: Upload measurement evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cydra-historical-access-control-measurement
+          path: |
+            ${{ runner.temp }}/benchmark-intake.txt
+            ${{ runner.temp }}/historical-access-control-campaign.json
+            ${{ runner.temp }}/historical-access-control-campaign.log
+          if-no-files-found: warn
+          retention-days: 14
