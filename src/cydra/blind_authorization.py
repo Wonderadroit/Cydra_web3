@@ -93,14 +93,21 @@ def _resolve_inherited_ownable_surface(
 ) -> tuple[bool, str, str]:
     """Find owner() along declared contract bases; this is not a general type resolver."""
     source_file = Path(source_path).resolve()
-    search_root = source_file.parent
-    for parent in list(source_file.parents)[:5]:
-        try:
-            if sum(1 for _ in parent.glob("*.sol")) > 1:
-                search_root = parent
-                break
-        except OSError:
-            continue
+    ancestors = list(source_file.parents)[:5]
+    # Prefer the selected Foundry project root so imported base contracts under
+    # lib/ remain in the bounded source search; do not stop at a crowded src/.
+    search_root = next(
+        (parent for parent in ancestors if (parent / "foundry.toml").is_file()),
+        source_file.parent,
+    )
+    if search_root == source_file.parent:
+        for parent in ancestors:
+            try:
+                if sum(1 for _ in parent.glob("*.sol")) > 1:
+                    search_root = parent
+                    break
+            except OSError:
+                continue
     source_by_contract: dict[str, str] = {}
     try:
         candidates = [p for p in search_root.rglob("*.sol") if p.is_file()]
