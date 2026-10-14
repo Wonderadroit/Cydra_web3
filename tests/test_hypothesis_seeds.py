@@ -2,6 +2,8 @@ from pathlib import Path
 
 from cydra.hypothesis_seeds import generate_hypothesis_seeds
 from cydra.models import ContractModel, FunctionModel
+from cydra.solidity_model import parse_solidity
+from cydra.reasoning import generate_access_control_hypotheses
 
 
 def test_direct_write_emits_derived_seed(tmp_path: Path):
@@ -84,3 +86,37 @@ def test_seed_coverage_counts_as_measurement_not_finding_readiness():
     assert _seed_coverage_allows_measurement([], [object()])
     assert not _seed_coverage_allows_measurement([object()], [object()])
     assert not _seed_coverage_allows_measurement([], [])
+
+
+
+def test_inherited_scope_comes_only_from_compiler_closure(tmp_path: Path):
+    child = tmp_path / "Child.sol"
+    base = tmp_path / "Base.sol"
+    base.write_text(
+        "pragma solidity ^0.8.20; contract Base { address public router; "
+        "function setRouter(address next) external { router = next; } }",
+        encoding="utf-8",
+    )
+    child.write_text(
+        "pragma solidity ^0.8.20; import './Base.sol'; contract Child is Base {}",
+        encoding="utf-8",
+    )
+
+    # Base.sol exists for declaration parsing but is deliberately absent from
+    # the compiler's exact source-unit closure: its body was not staged/analyzed.
+    modeled = parse_solidity(child, compiler_closure=("Child.sol",))
+    inherited = next(f for f in modeled[0].inherited_functions if f.name == "setRouter")
+    assert inherited.declaring_contract == "Base"
+    assert inherited.source == str(base.resolve())
+    assert inherited.body_scope == "out_of_scope"
+
+
+def test_read_only_balanceof_does_not_become_authorization_hypothesis(tmp_path: Path):
+    source = tmp_path / "Token.sol"
+    source.write_text(
+        "pragma solidity ^0.8.20; contract Token { "
+        "function balanceOf(address) external view returns (uint256) { return 0; } }",
+        encoding="utf-8",
+    )
+    contract = parse_solidity(source)[0]
+    assert not generate_access_control_hypotheses(contract)
