@@ -419,6 +419,7 @@ def main() -> int:
             source,
             target=f"{args.target_repo}@{args.target_ref}",
             semantic_evidence=compiler.evidence,
+            compiler_closure=compiler.source_closure,
         )
         hypotheses = [h for h in result.hypotheses if h.invariant_id == "INV-AUTH-001"]
         related_intent_parity_hypotheses = [
