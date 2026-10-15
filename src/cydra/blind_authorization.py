@@ -113,15 +113,53 @@ def generate_blind_authorization_test_from_experiment(
 
     source_text = _source_for_contract(source_text, target_type)
 
-    # The first supported authority surface is OpenZeppelin-style AccessControl.
-    # It is only measurable when both the role getter and hasRole read are present.
+    # OpenZeppelin AccessControl authority is measured using the exact role
+    # expression carried by the target's onlyRole(...) modifier invocation.
+    # The identifier is read through the deployed contract's public constant
+    # getter, so keccak256 role values are never reconstructed from their names.
     role_getter = None
-    if re.search(r"\bfunction\s+hasRole\s*\(", source_text):
-        role_match = re.search(
-            r"\bbytes32\s+public\s+constant\s+(DEFAULT_ADMIN_ROLE)\s*=", source_text
+    role_invocation = next(
+        (
+            arguments
+            for modifier_name, arguments in function.modifier_arguments
+            if modifier_name.lower() == "onlyrole" and len(arguments) == 1
+        ),
+        None,
+    )
+    if role_invocation:
+        role_expression = role_invocation[0].strip()
+        role_identifier = (
+            role_expression
+            if re.fullmatch(r"[A-Za-z_]\\w*", role_expression)
+            else None
         )
-        if role_match:
-            role_getter = role_match.group(1)
+        role_constant_declared = bool(
+            role_identifier
+            and re.search(
+                rf"\\bbytes32\\s+public\\s+constant\\s+{re.escape(role_identifier)}\\s*=",
+                source_text,
+            )
+        )
+        inherited_access_control = any(
+            "AccessControlUpgradeable" in inherited
+            or inherited == "AccessControl"
+            for inherited in contract_model.inherits
+        )
+        inherited_default_admin = (
+            role_identifier == "DEFAULT_ADMIN_ROLE" and inherited_access_control
+        )
+        inherited_has_role = any(
+            item.name == "hasRole" for item in contract_model.inherited_functions
+        )
+        has_role_surface = bool(
+            re.search(r"\\bfunction\\s+hasRole\\s*\\(", source_text)
+            or inherited_has_role
+            or inherited_access_control
+        )
+        if role_identifier and has_role_surface and (
+            role_constant_declared or inherited_default_admin
+        ):
+            role_getter = role_identifier
 
     ownable_supported = bool(
         re.search(r"\bfunction\s+owner\s*\(\s*\)", source_text)
@@ -161,11 +199,10 @@ def generate_blind_authorization_test_from_experiment(
         )
         verdict_logic = f'''        if (!ok) {{
             if (hadRoleBefore != hasRoleAfter) verdict = Verdict.Inconclusive;
-            else if (bytes(expectedGuard).length == 0) verdict = Verdict.Unmeasurable;
-            else if (keccak256(bytes(_revertReason(returnData))) == keccak256(bytes(expectedGuard))) verdict = Verdict.Rejected;
+            else if (_isAccessControlUnauthorized(returnData)) verdict = Verdict.Rejected;
+            else if (bytes(expectedGuard).length > 0 && keccak256(bytes(_revertReason(returnData))) == keccak256(bytes(expectedGuard))) verdict = Verdict.Rejected;
             else verdict = Verdict.Inconclusive;
-        }} else if (!hadRoleBefore && hasRoleAfter) verdict = Verdict.Supported;
-        else if (hadRoleBefore == hasRoleAfter) verdict = Verdict.Rejected;
+        }} else if (!hadRoleBefore) verdict = Verdict.Supported;
         else verdict = Verdict.Inconclusive;'''
     elif ownable_supported:
         before_observation = "        address ownerBefore = target.owner();"
@@ -232,6 +269,13 @@ contract CydraBlindAuthorizationTest {{
         if (selector != 0x08c379a0) return "";
         assembly {{ data := add(data, 0x04) }}
         return abi.decode(data, (string));
+    }}
+
+    function _isAccessControlUnauthorized(bytes memory data) internal pure returns (bool) {{
+        if (data.length < 4) return false;
+        bytes4 selector;
+        assembly {{ selector := mload(add(data, 0x20)) }}
+        return selector == bytes4(keccak256("AccessControlUnauthorizedAccount(address,bytes32)"));
     }}
 
     function setUp() public {{
