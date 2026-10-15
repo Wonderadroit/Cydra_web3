@@ -123,6 +123,7 @@ jobs:
           path: |
             ${{ runner.temp }}/target-intake.txt
             ${{ runner.temp }}/authorization-campaign.json
+            ${{ runner.temp }}/authorization-campaign.generated.t.sol
             ${{ runner.temp }}/authorization-campaign.log
           if-no-files-found: warn
           retention-days: 14
