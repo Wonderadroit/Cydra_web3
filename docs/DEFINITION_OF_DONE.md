@@ -57,3 +57,12 @@ Also retain the target-intake record and human-readable execution log. Artifact 
 ## Preconditions before interpreting authorization results
 
 A passing assertion is not evidence of correct authorization unless the experiment established the target's required operating preconditions. If deployment topology, initialization, roles, registrations, or required state are not established, classify the experiment as `UNMEASURABLE` with a specific blocker (for example, `preconditions_not_established`), not rejected/not-confirmed. Do not fabricate target state or silently expand the generic harness to support a new setup model.
+
+
+## Supported target class and selection boundary
+
+**Supported class:** standalone contract, direct deployment, caller-based authorization (`onlyOwner`, `onlyRole`, `hasRole`, or an equivalent explicit caller/role check), and a simple privileged setter; no proxy initialization, no required role provisioning, and no asset registration. **Frontier (Issue #68):** proxy plus initialization, role provisioning, and asset registration. A target that crosses that frontier is `UNMEASURABLE` until its preconditions can be established; do not infer authorization correctness from a setup failure.
+
+For a five-minute structural screen, inspect the implementation and its inheritance chain for `_disableInitializers`, initializer modifiers/functions, and `UUPSUpgradeable`. Their presence is a warning to inspect deployment/setup requirements, not an automatic vulnerability verdict. Their absence is necessary for this fast path, but not sufficient: still verify direct deployability, caller-based guard, setter state effect, and any constructor/configuration prerequisites against the pinned source.
+
+Prioritize candidate families with a plausible standalone shape: token contracts with `setMinter`/`setFee`/`setTreasury`; small registries with `register`/`deregister`/`setFee`; older pre-proxy factory contracts; governance helper contracts adjacent to (but not the timelock itself); and standalone AMO/strategy contracts. Verify the live bounty scope and exact target repository/ref before campaign execution. This structural filter is a target-selection contract, not evidence that a candidate is vulnerable.
