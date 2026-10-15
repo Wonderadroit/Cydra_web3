@@ -678,6 +678,17 @@ def parse_solidity(path: str | Path, *, include_inherited: bool = True) -> tuple
                 if depth == 0 and token not in solidity_signature_keywords:
                     modifier_tokens.append(token)
             modifiers = tuple(modifier_tokens)
+            modifier_arguments = []
+            for modifier_name in modifiers:
+                invocation = re.search(rf"\\b{re.escape(modifier_name)}\\b\\s*\\(", signature_tail)
+                if invocation is not None:
+                    span = _balanced_parenthesized_span(signature_tail, invocation.end() - 1)
+                    if span is not None:
+                        raw_arguments, _closing = span
+                        arguments = tuple(part.strip() for part in _split_parameters(raw_arguments))
+                        modifier_arguments.append((modifier_name, arguments))
+                else:
+                    modifier_arguments.append((modifier_name, ()))
             visibility_match = re.search(r"\b(public|external|internal|private)\b", signature_tail)
             visibility = visibility_match.group(1) if visibility_match else "unspecified"
             write_candidates = re.findall(
@@ -714,6 +725,7 @@ def parse_solidity(path: str | Path, *, include_inherited: bool = True) -> tuple
                     name=name,
                     visibility=visibility,
                     modifiers=modifiers,
+                    modifier_arguments=tuple(modifier_arguments),
                     writes=writes,
                     external_calls=external_calls,
                     line=_line_number(source, contract_start + match.start()),
