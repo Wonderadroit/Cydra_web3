@@ -101,6 +101,17 @@ def _closure(project: Path, entry: Path) -> tuple[dict[str, str], list[str]]:
         contents[unit] = source
         for spec in import_re.findall(strip_comments(source)):
             resolved = _resolve_import(project, unit, spec, remappings)
+            # A package source-unit name (e.g. @sample/pkg/A.sol) need not mirror
+            # its on-disk node_modules path. Solc resolves a relative import from
+            # the source-unit name, while the bytes can be read relative to the
+            # physical importing file. Preserve the former and use the latter.
+            if resolved is None and spec.startswith("."):
+                relative_unit = os.path.normpath(
+                    str(PurePosixPath(unit).parent.joinpath(spec))
+                ).replace("\\\\", "/")
+                relative_path = (path.parent / spec).resolve()
+                if relative_path.is_file():
+                    resolved = (relative_unit, relative_path)
             if resolved is None:
                 unresolved.add(f"{unit}: {spec}")
             elif resolved[0] not in contents:
