@@ -786,7 +786,10 @@ def main() -> int:
             # project so the workflow artifact contains what Foundry actually ran.
             # Keep this adjacent to the structured campaign JSON output.
             if args.output:
-                generated_artifact = args.output.with_name("authorization-campaign.generated.t.sol")
+                artifact_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", hypothesis.hypothesis_id)
+                generated_artifact = args.output.with_name(
+                    f"authorization-campaign.generated-{artifact_id}.t.sol"
+                )
                 generated_artifact.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(generated, generated_artifact)
             execution = run_foundry_test(execution_project, generated, experiment.experiment_id, "blind")
