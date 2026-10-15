@@ -625,7 +625,7 @@ def main() -> int:
                 "experiment_count": len(result.experiments),
                 "verdict_count": len(verdict_records),
                 "verdicts": verdict_records,
-                "finding_gate": "NOT_READY" if any(item.get("classification") == "unmeasurable" for item in verdict_records) else "MEASUREMENT_ONLY",
+                "finding_gate": "NOT_READY",
             }
             args.output.write_text(json.dumps(_json(campaign_payload), indent=2) + "\\n", encoding="utf-8")
         return 2 if campaign_failed else 0
