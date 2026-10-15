@@ -130,13 +130,13 @@ def generate_blind_authorization_test_from_experiment(
         role_expression = role_invocation[0].strip()
         role_identifier = (
             role_expression
-            if re.fullmatch(r"[A-Za-z_]\\w*", role_expression)
+            if re.fullmatch(r"[A-Za-z_]\w*", role_expression)
             else None
         )
         role_constant_declared = bool(
             role_identifier
             and re.search(
-                rf"\\bbytes32\\s+public\\s+constant\\s+{re.escape(role_identifier)}\\s*=",
+                rf"\bbytes32\s+public\s+constant\s+{re.escape(role_identifier)}\s*=",
                 source_text,
             )
         )
@@ -152,7 +152,7 @@ def generate_blind_authorization_test_from_experiment(
             item.name == "hasRole" for item in contract_model.inherited_functions
         )
         has_role_surface = bool(
-            re.search(r"\\bfunction\\s+hasRole\\s*\\(", source_text)
+            re.search(r"\bfunction\s+hasRole\s*\(", source_text)
             or inherited_has_role
             or inherited_access_control
         )
