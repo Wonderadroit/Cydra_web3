@@ -24,7 +24,9 @@ def test_authorization_investigation_is_scoped_to_authorization(tmp_path: Path):
     assert result.target == "fixture@pinned"
     assert result.status in {"HYPOTHESES_READY", "NO_AUTH_HYPOTHESIS"}
     assert all(item.invariant_id == "INV-AUTH-001" for item in result.hypotheses)
-    assert {item.hypothesis_id for item in result.hypotheses} <= {"H-AUTH-setOperator"}
+    assert {item.hypothesis_id for item in result.hypotheses} == {"H-AUTH-setOperator", "H-AUTH-setTreasury"}
+    classes = {item.target_function: item.hypothesis_class for item in result.hypotheses}
+    assert classes == {"setOperator": "unguarded_setter", "setTreasury": "guard_verification"}
     assert len(result.experiments) == len(result.hypotheses)
 
 
@@ -243,11 +245,11 @@ def test_modifier_restrictions_are_classified_structurally(tmp_path: Path):
     assert modifier_restriction_category(contract, functions["baz"], "onlyOwner") == "authorization"
     assert modifier_restriction_category(contract, functions["qux"], "onlyInitializing") == "lifecycle"
 
-    # Reentrancy protection is not mistaken for caller authorization.
-    assert "foo" in {item.target_function for item in result.hypotheses}
-    # A caller-identity guard suppresses the hypothesis even alongside nonReentrant.
-    assert "bar" not in {item.target_function for item in result.hypotheses}
-    assert "baz" not in {item.target_function for item in result.hypotheses}
+    # Non-authorization modifiers do not enter either candidate route.
+    assert "foo" not in {item.target_function for item in result.hypotheses}
+    # Caller-authorization modifiers route to guard verification, including when combined with nonReentrant.
+    assert {item.target_function for item in result.hypotheses} == {"bar", "baz"}
+    assert all(item.hypothesis_class == "guard_verification" for item in result.hypotheses)
     # Lifecycle-only surfaces remain honest blocked seeds, not authorization hypotheses.
     qux_seed = next(item for item in result.seeds if item.target_function == "qux")
     assert qux_seed.status == "blocked"
