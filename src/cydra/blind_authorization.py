@@ -212,12 +212,26 @@ def generate_blind_authorization_test_from_experiment(
         )
         if role_guard_shape:
             verdict_logic = f'''        if (!ok) {{
-                if (hadRoleBefore != hasRoleAfter) verdict = Verdict.Inconclusive;
-                else if (_isAccessControlUnauthorized(returnData)) verdict = Verdict.Rejected;
-                else if (bytes(expectedGuard).length > 0 && keccak256(bytes(_revertReason(returnData))) == keccak256(bytes(expectedGuard))) verdict = Verdict.Rejected;
-                else verdict = Verdict.Inconclusive;
-            }} else if (!hadRoleBefore) verdict = Verdict.Supported;
-            else verdict = Verdict.Inconclusive;'''
+                if (hadRoleBefore != hasRoleAfter) {{
+                    verdict = Verdict.Inconclusive;
+                    verdictReason = "role_membership_changed_during_call";
+                }} else if (_isAccessControlUnauthorized(returnData)) {{
+                    verdict = Verdict.Rejected;
+                    verdictReason = "access_control_unauthorized_account";
+                }} else if (bytes(expectedGuard).length > 0 && keccak256(bytes(_revertReason(returnData))) == keccak256(bytes(expectedGuard))) {{
+                    verdict = Verdict.Rejected;
+                    verdictReason = "authorization_guard_revert_matched";
+                }} else {{
+                    verdict = Verdict.Inconclusive;
+                    verdictReason = "guard_revert_not_identified";
+                }}
+            }} else if (!hadRoleBefore) {{
+                verdict = Verdict.Supported;
+                verdictReason = "unauthorized_call_succeeded";
+            }} else {{
+                verdict = Verdict.Inconclusive;
+                verdictReason = "caller_already_had_role";
+            }}'''
         else:
             # Legacy authority-delta shape: test whether the call itself granted
             # the caller a role, rather than treating any successful call as a
