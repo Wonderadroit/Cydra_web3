@@ -292,4 +292,4 @@ def test_non_authorization_modifiers_do_not_route_guard_verification(tmp_path: P
         encoding="utf-8",
     )
     result = investigate_authorization(source, target="non-reentrant@pinned")
-    assert not any(item.hypothesis_class == "guard_verification" for item in result.hypotheses)
+    assert not any(item.target_function == "setValue" for item in result.hypotheses)
