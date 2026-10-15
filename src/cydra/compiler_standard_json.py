@@ -23,9 +23,9 @@ def _persist_solc_diagnostics(project: Path, input_json: dict[str, Any], errors:
     root = Path(os.environ.get("CYDRA_SOLC_DIAGNOSTIC_DIR", project / ".cydra-diagnostics"))
     root.mkdir(parents=True, exist_ok=True)
     (root / "solc-input-keys.json").write_text(
-        json.dumps(sorted(input_json.get("sources", {}).keys()), indent=2) + "\\n", encoding="utf-8"
+        json.dumps(sorted(input_json.get("sources", {}).keys()), indent=2) + "\n", encoding="utf-8"
     )
-    (root / "solc-errors.json").write_text(json.dumps(errors, indent=2) + "\\n", encoding="utf-8")
+    (root / "solc-errors.json").write_text(json.dumps(errors, indent=2) + "\n", encoding="utf-8")
 
 
 def _redact(text: str) -> str:
