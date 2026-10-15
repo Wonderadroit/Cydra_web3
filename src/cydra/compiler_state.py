@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .ast_dataflow import SemanticRelationshipEvidence, extract_ast_relationships
+from .ast_dataflow import SemanticRelationshipEvidence, extract_compilation_relationships
 from .compiler_constraints import ConstraintEvidence, collect_ast_declarations, extract_parameter_constraints
 
 
@@ -183,9 +183,8 @@ def extract_state_effects_from_build_info(
     build_info: Path, source: Path, project: Path, source_allowlist: set[str] | None = None
 ) -> tuple[SemanticRelationshipEvidence, ...]:
     payload = json.loads(build_info.read_text(encoding="utf-8"))
-    evidence: list[SemanticRelationshipEvidence] = []
-    for source_key, ast in _source_asts(payload, source_allowlist):
-        evidence.extend(extract_ast_relationships(ast, source_key))
+    source_asts = list(_source_asts(payload, source_allowlist))
+    evidence = list(extract_compilation_relationships(source_asts))
     # A project can emit multiple build-info records that repeat imported sources.
     unique: dict[tuple[Any, ...], SemanticRelationshipEvidence] = {}
     for item in evidence:
