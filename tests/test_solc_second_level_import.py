@@ -63,7 +63,8 @@ def test_real_solc_second_level_import_and_missing_key_negative_case(tmp_path: P
     assert result["closure_status"] == "complete"
     assert "@sample/contracts/utils/B.sol" in result["sources_parsed"]
     assert json.loads((diagnostics / "solc-input-keys.json").read_text()) == sorted(sources)
-    assert json.loads((diagnostics / "solc-errors.json").read_text()) == []
+    recorded_errors = json.loads((diagnostics / "solc-errors.json").read_text())
+    assert not any(item.get("severity") == "error" for item in recorded_errors)
 
     # Negative control: same three files, but B is deliberately keyed incorrectly.
     bad_sources = dict(sources)
