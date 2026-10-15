@@ -553,6 +553,7 @@ def main() -> int:
                     "experiment": _json(experiment),
                     "blind_execution": _json(execution),
                     "classification": outcome.benchmark_status,
+                    "hypothesis_class": hypothesis.hypothesis_class,
                     "verdict": outcome.verdict,
                     "verdict_reason": outcome.verdict_reason,
                     "finding_gate": "NOT_READY",
