@@ -551,9 +551,11 @@ def _inherited_functions(
         base = next((item for item in contracts if item.name == inherited_name), None)
         if base is None:
             continue
-        # Keep inherited declarations as context, but do not imply their bodies
-        # have been analyzed in the selected target-source scope.
-        functions.extend(replace(function, body_scope="out_of_scope") for function in base.functions)
+        # Preserve the body_scope assigned by the source model. The resolved
+        # inherited source is part of the import/inheritance graph; unconditionally
+        # overwriting this field here contradicts the compiler-closure classifier
+        # and causes seed generation to re-derive scope from a stale value.
+        functions.extend(base.functions)
         functions.extend(_inherited_functions(root, resolved_path, base.inherits, seen))
     deduped: list[FunctionModel] = []
     seen_keys: set[tuple[str, int, str]] = set()
@@ -561,7 +563,7 @@ def _inherited_functions(
         key = (function.name, function.line, function.visibility)
         if key not in seen_keys:
             seen_keys.add(key)
-            deduped.append(replace(function, body_scope="out_of_scope"))
+            deduped.append(function)
     return tuple(deduped)
 
 
