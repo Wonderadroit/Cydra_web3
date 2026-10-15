@@ -28,6 +28,196 @@ def _seed_coverage_allows_measurement(hypotheses, seeds) -> bool:
     return not hypotheses and bool(seeds)
 
 
+def _materialize_target_dependencies(project: Path) -> dict:
+    """Install manifest-declared npm dependencies without executing lifecycle scripts."""
+    manifest = project / "package.json"
+    if not manifest.is_file():
+        return {
+            "status": "NOT_REQUIRED",
+            "package_manager": None,
+            "lockfile": None,
+            "confidence": "not_applicable",
+            "lifecycle_scripts_disabled": True,
+            "command": [],
+            "detail": "No package.json in target project.",
+        }
+
+    try:
+        package = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {
+            "status": "BLOCKED",
+            "package_manager": None,
+            "lockfile": None,
+            "confidence": "none",
+            "lifecycle_scripts_disabled": True,
+            "command": [],
+            "detail": f"Could not parse package.json: {exc}",
+        }
+
+    dependency_sections = ("dependencies", "devDependencies", "optionalDependencies")
+    if not any(package.get(section) for section in dependency_sections):
+        return {
+            "status": "NOT_REQUIRED",
+            "package_manager": None,
+            "lockfile": None,
+            "confidence": "not_applicable",
+            "lifecycle_scripts_disabled": True,
+            "command": [],
+            "detail": "package.json declares no installable dependency sections.",
+        }
+
+    lockfiles = [
+        (name, manager)
+        for name, manager in (
+            ("package-lock.json", "npm"),
+            ("pnpm-lock.yaml", "pnpm"),
+            ("yarn.lock", "yarn"),
+            ("bun.lock", "bun"),
+            ("bun.lockb", "bun"),
+        )
+        if (project / name).is_file()
+    ]
+    distinct_managers = {manager for _, manager in lockfiles}
+    if len(distinct_managers) > 1:
+        return {
+            "status": "BLOCKED",
+            "package_manager": None,
+            "lockfile": [name for name, _ in lockfiles],
+            "confidence": "none",
+            "lifecycle_scripts_disabled": True,
+            "command": [],
+            "detail": "Conflicting package-manager lockfiles are present; refusing to guess.",
+        }
+
+    if lockfiles:
+        lockfile, manager = lockfiles[0]
+        confidence = "lockfile_pinned"
+    else:
+        lockfile, manager = None, "npm"
+        confidence = "manifest_unlocked_lower_confidence"
+
+    if manager == "npm":
+        executable = shutil.which("npm")
+        prefix = [executable] if executable else []
+        install_args = (
+            ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]
+            if lockfile == "package-lock.json"
+            else ["install", "--ignore-scripts", "--no-audit", "--no-fund"]
+        )
+    elif manager in {"pnpm", "yarn"}:
+        executable = shutil.which(manager)
+        if executable:
+            prefix = [executable]
+        elif shutil.which("corepack"):
+            prefix = [shutil.which("corepack"), manager]
+        else:
+            prefix = []
+        if manager == "pnpm":
+            install_args = ["install", "--ignore-scripts", "--frozen-lockfile"]
+        else:
+            install_args = []
+    else:
+        executable = shutil.which("bun")
+        prefix = [executable] if executable else []
+        install_args = ["install", "--ignore-scripts", "--frozen-lockfile"]
+
+    if not prefix:
+        return {
+            "status": "BLOCKED",
+            "package_manager": manager,
+            "lockfile": lockfile,
+            "confidence": confidence,
+            "lifecycle_scripts_disabled": True,
+            "command": [],
+            "detail": f"Required package manager {manager!r} is unavailable; no fallback was attempted.",
+        }
+
+    if manager == "yarn":
+        version_probe = subprocess.run(
+            prefix + ["--version"],
+            cwd=project,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+        if version_probe.returncode != 0:
+            return {
+                "status": "BLOCKED",
+                "package_manager": manager,
+                "lockfile": lockfile,
+                "confidence": confidence,
+                "lifecycle_scripts_disabled": True,
+                "command": prefix + ["install", "--ignore-scripts"],
+                "detail": "Could not determine Yarn version to select lockfile-safe install flags.",
+                "stderr": (version_probe.stderr or "")[-4000:],
+            }
+        version_match = re.match(r"\s*(\d+)", version_probe.stdout or "")
+        if not version_match:
+            return {
+                "status": "BLOCKED",
+                "package_manager": manager,
+                "lockfile": lockfile,
+                "confidence": confidence,
+                "lifecycle_scripts_disabled": True,
+                "command": prefix + ["install", "--ignore-scripts"],
+                "detail": "Yarn version output was not parseable.",
+            }
+        if int(version_match.group(1)) == 1:
+            install_args = ["install", "--ignore-scripts", "--frozen-lockfile", "--non-interactive"]
+        else:
+            install_args = ["install", "--ignore-scripts", "--immutable"]
+
+    command = prefix + install_args
+    if "--ignore-scripts" not in command:
+        return {
+            "status": "BLOCKED",
+            "package_manager": manager,
+            "lockfile": lockfile,
+            "confidence": confidence,
+            "lifecycle_scripts_disabled": False,
+            "command": command,
+            "detail": "Safety invariant violated: install command does not disable lifecycle scripts.",
+        }
+
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=project,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=900,
+        )
+        return {
+            "status": "INSTALLED" if completed.returncode == 0 else "BLOCKED",
+            "package_manager": manager,
+            "lockfile": lockfile,
+            "confidence": confidence,
+            "lifecycle_scripts_disabled": True,
+            "command": command,
+            "return_code": completed.returncode,
+            "stdout": (completed.stdout or "")[-4000:],
+            "stderr": (completed.stderr or "")[-4000:],
+            "detail": (
+                "Dependencies installed with lifecycle scripts disabled."
+                if completed.returncode == 0
+                else "Package-manager installation failed; isolated execution must remain unmeasurable."
+            ),
+        }
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {
+            "status": "BLOCKED",
+            "package_manager": manager,
+            "lockfile": lockfile,
+            "confidence": confidence,
+            "lifecycle_scripts_disabled": True,
+            "command": command,
+            "detail": f"Dependency installation could not complete: {exc}",
+        }
+
+
 
 def _prepare_isolated_foundry_project(target_root: Path, source: Path, destination: Path) -> Path:
     """Copy only the target's local Solidity import closure into a clean Foundry root."""
@@ -393,12 +583,6 @@ def main() -> int:
         default=[],
         help="Copy a target-relative file from another git ref using path@ref, for historical build repairs.",
     )
-    parser.add_argument(
-        "--target-npm-dependency",
-        action="append",
-        default=[],
-        help="Install an npm package into the historical target before bounded execution.",
-    )
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[1]
@@ -423,6 +607,17 @@ def main() -> int:
             destination = checkout / relative_path
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_text(blob, encoding="utf-8")
+        dependency_materialization = _materialize_target_dependencies(project)
+        print(
+            "DEPENDENCY_MATERIALIZATION",
+            dependency_materialization.get("status"),
+            "manager=",
+            dependency_materialization.get("package_manager"),
+            "lockfile=",
+            dependency_materialization.get("lockfile"),
+            "confidence=",
+            dependency_materialization.get("confidence"),
+        )
         compiler = compile_state_effects(project, source)
         result = investigate_authorization(
             source,
@@ -447,6 +642,7 @@ def main() -> int:
                 result,
                 related_intent_parity_hypotheses=related_intent_parity_hypotheses,
             )
+            payload["dependency_materialization"] = dependency_materialization
             if args.output:
                 args.output.parent.mkdir(parents=True, exist_ok=True)
                 args.output.write_text(json.dumps(_json(payload), indent=2) + "\n", encoding="utf-8")
@@ -464,34 +660,42 @@ def main() -> int:
                 return 0
             raise SystemExit("blind authorization backtest produced no authorization hypothesis or measurable seed coverage")
 
-        for dependency in args.target_npm_dependency:
-            subprocess.run(
-                ("npm", "install", dependency, "--no-save", "--ignore-scripts", "--no-audit", "--no-fund"),
-                cwd=project,
-                check=True,
+        if dependency_materialization.get("status") == "BLOCKED":
+            hypothesis = hypotheses[0] if hypotheses else None
+            experiment = next(
+                (e for e in result.experiments if hypothesis and e.hypothesis_id == hypothesis.hypothesis_id),
+                None,
             )
+            execution = ExecutionResult(
+                experiment_id=experiment.experiment_id if experiment else "dependency-materialization",
+                target=str(source),
+                command=tuple(dependency_materialization.get("command") or ()),
+                exit_code=2,
+                executed=False,
+                tests_run=0,
+                tests_failed=0,
+                status="UNMEASURABLE",
+                stdout=dependency_materialization.get("stdout", ""),
+                stderr=dependency_materialization.get("detail", "Target dependencies could not be materialized."),
+            )
+            payload = {
+                "target": f"{args.target_repo}@{args.target_ref}:{args.target_path}",
+                "hypothesis_seeds": _json(getattr(result, "seeds", ())),
+                "hypothesis": _json(hypothesis) if hypothesis else None,
+                "experiment": _json(experiment) if experiment else None,
+                "dependency_materialization": dependency_materialization,
+                "blind_execution": _json(execution),
+                "classification": "UNMEASURABLE",
+                "finding_gate": "NOT_READY",
+            }
+            if args.output:
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                args.output.write_text(json.dumps(_json(payload), indent=2) + "\\n", encoding="utf-8")
+            print("EXECUTION_STATUS UNMEASURABLE reason=dependency_materialization_blocked")
+            return 2
 
         execution_project = Path(temp) / "execution-project"
         _prepare_isolated_foundry_project(checkout, source, execution_project)
-        for dependency in args.target_npm_dependency:
-            package_name = dependency.split("@", 1)[0] if not dependency.startswith("@") else dependency.rsplit("@", 1)[0]
-            if package_name == "@openzeppelin/contracts":
-                package_source = project / "node_modules" / "@openzeppelin" / "contracts"
-                package_destination = execution_project / "node_modules" / "@openzeppelin" / "contracts"
-                package_destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copytree(package_source, package_destination, dirs_exist_ok=True)
-                # Foundry does not search npm's node_modules tree by default.
-                # Historical Alchemix imports use the package prefix directly,
-                # so add the deterministic remapping in the isolated project.
-                foundry_toml = execution_project / "foundry.toml"
-                remapping = "@openzeppelin/=node_modules/@openzeppelin/"
-                current = foundry_toml.read_text(encoding="utf-8")
-                current = current.replace(
-                    'remappings = [',
-                    'remappings = [' + repr(remapping) + ', ',
-                    1,
-                )
-                foundry_toml.write_text(current, encoding="utf-8")
 
         source_root = next(
             (
@@ -551,6 +755,7 @@ def main() -> int:
                     "hypothesis_seeds": _json(getattr(result, "seeds", ())),
                     "hypothesis": _json(hypothesis),
                     "experiment": _json(experiment),
+                    "dependency_materialization": dependency_materialization,
                     "blind_execution": _json(execution),
                     "classification": outcome.benchmark_status,
                     "finding_gate": "NOT_READY",
@@ -579,7 +784,7 @@ def main() -> int:
             )
             if outcome.benchmark_status != args.expected_status:
                 return 2
-            payload={"target":f"{args.target_repo}@{args.target_ref}:{args.target_path}","hypothesis_seeds":_json(getattr(result, "seeds", ())),"hypothesis":_json(hypothesis),"experiment":_json(experiment),"blind_execution":_json(execution),"classification":outcome.benchmark_status,"finding_gate":"CONFIRMED_ONLY"}
+            payload={"target":f"{args.target_repo}@{args.target_ref}:{args.target_path}","hypothesis_seeds":_json(getattr(result, "seeds", ())),"hypothesis":_json(hypothesis),"experiment":_json(experiment),"dependency_materialization":dependency_materialization,"blind_execution":_json(execution),"classification":outcome.benchmark_status,"finding_gate":"CONFIRMED_ONLY"}
             if args.require_ready and outcome.benchmark_status=="confirmed":
                 isolated_source = execution_project / "src" / source_relative
                 auth_context = "\n".join(
