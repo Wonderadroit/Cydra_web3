@@ -305,17 +305,17 @@ def test_only_role_arguments_feed_has_role_authority_measurement(tmp_path: Path)
 
     source = tmp_path / "RoleTarget.sol"
     source.write_text(
-        "pragma solidity ^0.8.20;\\n"
-        "contract AccessControlUpgradeable {\\n"
-        "  mapping(bytes32 => mapping(address => bool)) private _roles;\\n"
-        "  function hasRole(bytes32 role, address account) public view returns (bool) { return _roles[role][account]; }\\n"
-        "}\\n"
-        "contract RoleTarget is AccessControlUpgradeable {\\n"
-        "  bytes32 public constant CONTROLLER_ROLE = keccak256(\\"CONTROLLER_ROLE\\");\\n"
-        "  address public value;\\n"
-        "  modifier onlyRole(bytes32 role) { require(hasRole(role, msg.sender), \\"missing role\\"); _; }\\n"
-        "  function setValue(address next) external onlyRole(CONTROLLER_ROLE) { value = next; }\\n"
-        "}\\n",
+        "pragma solidity ^0.8.20;\n"
+        "contract AccessControlUpgradeable {\n"
+        "  mapping(bytes32 => mapping(address => bool)) private _roles;\n"
+        "  function hasRole(bytes32 role, address account) public view returns (bool) { return _roles[role][account]; }\n"
+        "}\n"
+        "contract RoleTarget is AccessControlUpgradeable {\n"
+        "  bytes32 public constant CONTROLLER_ROLE = keccak256(\"CONTROLLER_ROLE\");\n"
+        "  address public value;\n"
+        "  modifier onlyRole(bytes32 role) { require(hasRole(role, msg.sender), \"missing role\"); _; }\n"
+        "  function setValue(address next) external onlyRole(CONTROLLER_ROLE) { value = next; }\n"
+        "}\n",
         encoding="utf-8",
     )
 
