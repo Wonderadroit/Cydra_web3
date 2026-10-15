@@ -502,6 +502,8 @@ def main() -> int:
             project,
         )
         source_relative = Path(source).relative_to(source_root)
+        verdict_records = []
+        campaign_failed = False
         for hypothesis in hypotheses:
             experiment = next(e for e in result.experiments if e.hypothesis_id == hypothesis.hypothesis_id)
             contract = next(
@@ -568,7 +570,8 @@ def main() -> int:
                     f"{hypothesis.hypothesis_id}: status={execution.status} "
                     f"classification={outcome.benchmark_status} evidence={outcome.evidence.evidence_id}"
                 )
-                return 2
+                verdict_records.append(payload)
+                continue
             execution = run_foundry_test(execution_project, generated, experiment.experiment_id, "blind")
             print("EXECUTION_STATUS", execution.status, "exit=", execution.exit_code, "tests=", execution.tests_run, "failed=", execution.tests_failed)
             print(execution.stdout)
@@ -581,7 +584,7 @@ def main() -> int:
                 f"classification={outcome.benchmark_status} evidence={outcome.evidence.evidence_id}"
             )
             if not args.measurement_only and outcome.benchmark_status != args.expected_status:
-                return 2
+                campaign_failed = True
             payload={"target":f"{args.target_repo}@{args.target_ref}:{args.target_path}","hypothesis_seeds":_json(getattr(result, "seeds", ())),"hypothesis":_json(hypothesis),"experiment":_json(experiment),"blind_execution":_json(execution),"classification":outcome.benchmark_status,"verdict":outcome.verdict,"verdict_reason":outcome.verdict_reason,"finding_gate":"CONFIRMED_ONLY"}
             if args.require_ready and outcome.benchmark_status=="confirmed":
                 isolated_source = execution_project / "src" / source_relative
@@ -612,9 +615,20 @@ def main() -> int:
                     args.output.parent.mkdir(parents=True,exist_ok=True)
                     args.output.write_text(json.dumps(_json(payload),indent=2)+"\n",encoding="utf-8")
                 if not (causal and repro): return 4
-            if args.output:
-                args.output.parent.mkdir(parents=True,exist_ok=True); args.output.write_text(json.dumps(_json(payload),indent=2)+"\n",encoding="utf-8")
-        return 0
+            verdict_records.append(payload)
+        if args.output:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            campaign_payload = {
+                "target": f"{args.target_repo}@{args.target_ref}:{args.target_path}",
+                "hypothesis_seeds": _json(getattr(result, "seeds", ())),
+                "hypothesis_count": len(hypotheses),
+                "experiment_count": len(result.experiments),
+                "verdict_count": len(verdict_records),
+                "verdicts": verdict_records,
+                "finding_gate": "NOT_READY" if any(item.get("classification") == "unmeasurable" for item in verdict_records) else "MEASUREMENT_ONLY",
+            }
+            args.output.write_text(json.dumps(_json(campaign_payload), indent=2) + "\\n", encoding="utf-8")
+        return 2 if campaign_failed else 0
 
 
 if __name__ == "__main__":
