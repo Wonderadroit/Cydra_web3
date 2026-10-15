@@ -32,6 +32,7 @@ class CompilerEvidenceResult:
     source_ast_found: bool = False
     source_dependency_count: int = 0
     unresolved_imports: tuple[str, ...] = ()
+    closure_status: str = "complete"
 
 
 def _source_keys(payload: dict[str, Any], source: Path, project: Path) -> tuple[tuple[str, dict[str, Any]], ...]:
