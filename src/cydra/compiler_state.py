@@ -362,7 +362,8 @@ def compile_state_effects(project: str | Path, source: str | Path) -> CompilerEv
     if not project_path.exists() or not source_path.exists():
         return CompilerEvidenceResult((), (), False, "input_missing", command, "", "project or source missing")
     if not (project_path / "foundry.toml").is_file() and _is_hardhat_project(project_path):
-        return _compile_hardhat_state_effects(project_path, source_path)
+        from .compiler_hardhat_direct import compile_hardhat_direct
+        return compile_hardhat_direct(project_path, source_path)
 
     with tempfile.TemporaryDirectory(prefix="cydra-build-info-", dir=project_path.parent) as temp:
         info_path = Path(temp)
