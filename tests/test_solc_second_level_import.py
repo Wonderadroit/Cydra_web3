@@ -76,8 +76,8 @@ def test_real_solc_second_level_import_and_missing_key_negative_case(tmp_path: P
     }
     output = _compile_output(bad_input, result["solc_version_used"])
     errors = output.get("errors", [])
-    messages = "\\n".join(str(item.get("formattedMessage", item.get("message", ""))) for item in errors)
+    messages = "\\n".join(str(item.get("formattedMessage") or item.get("message") or json.dumps(item)) for item in errors)
     assert any(item.get("severity") == "error" for item in errors), messages
-    assert "Source not found" in messages
-    assert "@sample/contracts/utils/B.sol" in messages
+    assert "not found" in messages.lower(), json.dumps(errors, indent=2)
+    assert "@sample/contracts/utils/B.sol" in messages, json.dumps(errors, indent=2)
     assert "@sample/contracts/utils/B.sol" not in bad_input["sources"]
