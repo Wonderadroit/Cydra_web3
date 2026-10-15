@@ -237,3 +237,30 @@ def test_dependency_materialization_is_lockfile_aware_and_disables_scripts(
         assert result["lockfile"] == lockfile
     else:
         assert result["lockfile"] is None
+
+
+def test_conflicting_lockfiles_fail_closed_without_installing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = tmp_path / "conflicting-lockfiles"
+    project.mkdir()
+    _write(
+        project / "package.json",
+        json.dumps({"name": "fixture", "dependencies": {"example-solidity-package": "1.2.3"}}),
+    )
+    _write(project / "package-lock.json", "{}")
+    _write(project / "pnpm-lock.yaml", "lockfileVersion: '9.0'\\n")
+    calls: list[list[str]] = []
+
+    def fake_run(command, *args, **kwargs):
+        calls.append([str(item) for item in command])
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    result = _materialize_target_dependencies(project)
+
+    assert result["status"] == "BLOCKED"
+    assert result["lifecycle_scripts_disabled"] is True
+    assert result["command"] == []
+    assert calls == []
