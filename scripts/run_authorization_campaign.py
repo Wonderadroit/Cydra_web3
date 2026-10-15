@@ -79,7 +79,7 @@ def _materialize_target_dependencies(project: Path) -> dict:
         if (project / name).is_file()
     ]
     distinct_managers = {manager for _, manager in lockfiles}
-    if len(distinct_managers) > 1:
+    if len(lockfiles) > 1:
         return {
             "status": "BLOCKED",
             "package_manager": None,
@@ -87,7 +87,7 @@ def _materialize_target_dependencies(project: Path) -> dict:
             "confidence": "none",
             "lifecycle_scripts_disabled": True,
             "command": [],
-            "detail": "Conflicting package-manager lockfiles are present; refusing to guess.",
+            "detail": "Multiple package-manager lockfiles are present; refusing to guess.",
         }
 
     if lockfiles:
@@ -134,14 +134,25 @@ def _materialize_target_dependencies(project: Path) -> dict:
         }
 
     if manager == "yarn":
-        version_probe = subprocess.run(
-            prefix + ["--version"],
-            cwd=project,
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=30,
-        )
+        try:
+            version_probe = subprocess.run(
+                prefix + ["--version"],
+                cwd=project,
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=30,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return {
+                "status": "BLOCKED",
+                "package_manager": manager,
+                "lockfile": lockfile,
+                "confidence": confidence,
+                "lifecycle_scripts_disabled": True,
+                "command": prefix + ["--version"],
+                "detail": f"Could not query Yarn version safely: {exc}",
+            }
         if version_probe.returncode != 0:
             return {
                 "status": "BLOCKED",
@@ -690,7 +701,7 @@ def main() -> int:
             }
             if args.output:
                 args.output.parent.mkdir(parents=True, exist_ok=True)
-                args.output.write_text(json.dumps(_json(payload), indent=2) + "\\n", encoding="utf-8")
+                args.output.write_text(json.dumps(_json(payload), indent=2) + "\n", encoding="utf-8")
             print("EXECUTION_STATUS UNMEASURABLE reason=dependency_materialization_blocked")
             return 2
 
