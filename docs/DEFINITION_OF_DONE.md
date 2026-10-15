@@ -44,3 +44,16 @@ The first specialty is not complete until every gate below has evidence.
 The campaign report must include separate fields for engineering job status, hypothesis selection status, experiment execution status, causal verification status, independent reproduction status, final finding gate, blockers, and coverage limits.
 
 A run is not ready if it compiles but executes zero meaningful experiments, produces zero hypotheses, or cannot verify impact. A completed measurement is not the same as a completed security investigation.
+
+
+## Campaign artifact doctrine — mandatory
+
+Every campaign artifact must preserve both:
+- the exact generated Solidity test source that was passed to Foundry; and
+- the structured execution/campaign record (including target pin, hypothesis/experiment, execution status, classification, evidence, and blockers).
+
+Also retain the target-intake record and human-readable execution log. Artifact preservation is part of the experiment's reproducibility contract, not optional debugging output. If a generated test cannot be rendered, record that fact and the specific reason in the structured record; never imply a test ran when no generated source was executed.
+
+## Preconditions before interpreting authorization results
+
+A passing assertion is not evidence of correct authorization unless the experiment established the target's required operating preconditions. If deployment topology, initialization, roles, registrations, or required state are not established, classify the experiment as `UNMEASURABLE` with a specific blocker (for example, `preconditions_not_established`), not rejected/not-confirmed. Do not fabricate target state or silently expand the generic harness to support a new setup model.
