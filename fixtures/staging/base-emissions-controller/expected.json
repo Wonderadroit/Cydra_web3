@@ -1,0 +1,13 @@
+{
+  "source": "src/protocol/emissions/BaseEmissionsController.sol",
+  "staged_files": [
+    "src/protocol/emissions/BaseEmissionsController.sol",
+    "src/interfaces/IBaseEmissionsController.sol",
+    "src/interfaces/ITrust.sol",
+    "src/interfaces/IMetaLayer.sol",
+    "src/interfaces/ICoreEmissionsController.sol",
+    "src/protocol/emissions/CoreEmissionsController.sol",
+    "src/protocol/emissions/MetaERC20Dispatcher.sol"
+  ],
+  "compile": true
+}

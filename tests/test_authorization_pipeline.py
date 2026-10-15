@@ -295,3 +295,43 @@ def test_non_authorization_modifiers_do_not_route_guard_verification(tmp_path: P
     )
     result = investigate_authorization(source, target="non-reentrant@pinned")
     assert not any(item.target_function == "setValue" for item in result.hypotheses)
+
+
+
+def test_only_role_arguments_feed_has_role_authority_measurement(tmp_path: Path):
+    from cydra.blind_authorization import generate_blind_authorization_test_from_experiment
+    from cydra.reasoning import plan_access_control_experiment
+    from cydra.solidity_model import parse_solidity
+
+    source = tmp_path / "RoleTarget.sol"
+    source.write_text(
+        "pragma solidity ^0.8.20;\n"
+        "contract AccessControlUpgradeable {\n"
+        "  mapping(bytes32 => mapping(address => bool)) private _roles;\n"
+        "  function hasRole(bytes32 role, address account) public view returns (bool) { return _roles[role][account]; }\n"
+        "}\n"
+        "contract RoleTarget is AccessControlUpgradeable {\n"
+        "  bytes32 public constant CONTROLLER_ROLE = keccak256(\"CONTROLLER_ROLE\");\n"
+        "  address public value;\n"
+        "  modifier onlyRole(bytes32 role) { require(hasRole(role, msg.sender), \"missing role\"); _; }\n"
+        "  function setValue(address next) external onlyRole(CONTROLLER_ROLE) { value = next; }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    contract = next(item for item in parse_solidity(source) if item.name == "RoleTarget")
+    function = next(item for item in contract.functions if item.name == "setValue")
+    assert function.modifiers == ("onlyRole",)
+    assert function.modifier_arguments == (("onlyRole", ("CONTROLLER_ROLE",)),)
+
+    result = investigate_authorization(source, target="role-argument@pinned")
+    hypothesis = next(item for item in result.hypotheses if item.target_function == "setValue")
+    experiment = plan_access_control_experiment(hypothesis)
+    generated = generate_blind_authorization_test_from_experiment(
+        hypothesis, experiment, "RoleTarget.sol", "RoleTarget",
+        tmp_path / "GeneratedRoleTest.t.sol", contract,
+    )
+    test_source = generated.read_text(encoding="utf-8")
+    assert "target.hasRole(target.CONTROLLER_ROLE(), address(attacker))" in test_source
+    assert "_isAccessControlUnauthorized(returnData)" in test_source
+    assert "AccessControlUnauthorizedAccount(address,bytes32)" in test_source

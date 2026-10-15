@@ -71,6 +71,9 @@ class FunctionModel:
     source: str | None = None
     # Inherited declarations may be visible to the model while their bodies remain outside this analysis scope.
     body_scope: Literal["in_scope", "out_of_scope"] = "in_scope"
+    # Exact modifier call arguments, e.g. ("onlyRole", ("CONTROLLER_ROLE",)).
+    # Preserve expressions as source syntax; do not guess their evaluated values.
+    modifier_arguments: tuple[tuple[str, tuple[str, ...]], ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)

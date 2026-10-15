@@ -76,7 +76,7 @@ def _prepare_isolated_foundry_project(target_root: Path, source: Path, destinati
         for imported in _IMPORT_RE.findall(text):
             if imported.startswith("."):
                 dependency = (current.parent / imported).resolve()
-            elif imported.startswith(("contracts/", "lib/", "node_modules/")):
+            elif imported.startswith(("contracts/", "src/", "lib/", "node_modules/")):
                 # These are repository-root imports, not source-root imports.
                 dependency = (target_root / imported).resolve()
             else:

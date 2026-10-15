@@ -1,0 +1,9 @@
+{
+  "source": "src/Foo.sol",
+  "staged_files": [
+    "src/Foo.sol",
+    "node_modules/pkg/Bar.sol",
+    "node_modules/pkg/Nested.sol"
+  ],
+  "compile": true
+}
