@@ -585,7 +585,7 @@ def main() -> int:
             )
             if not args.measurement_only and outcome.benchmark_status != args.expected_status:
                 campaign_failed = True
-            payload={"target":f"{args.target_repo}@{args.target_ref}:{args.target_path}","hypothesis_seeds":_json(getattr(result, "seeds", ())),"hypothesis":_json(hypothesis),"experiment":_json(experiment),"blind_execution":_json(execution),"classification":outcome.benchmark_status,"verdict":outcome.verdict,"verdict_reason":outcome.verdict_reason,"finding_gate":"CONFIRMED_ONLY"}
+            payload={"target":f"{args.target_repo}@{args.target_ref}:{args.target_path}","hypothesis_seeds":_json(getattr(result, "seeds", ())),"hypothesis":_json(hypothesis),"experiment":_json(experiment),"blind_execution":_json(execution),"classification":outcome.benchmark_status,"hypothesis_class":hypothesis.hypothesis_class,"verdict":outcome.verdict,"verdict_reason":outcome.verdict_reason,"finding_gate":"NOT_READY"}
             if args.require_ready and outcome.benchmark_status=="confirmed":
                 isolated_source = execution_project / "src" / source_relative
                 auth_context = "\n".join(
