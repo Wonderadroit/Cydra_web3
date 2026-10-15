@@ -179,13 +179,179 @@ def _source_asts(payload: dict[str, Any], source_allowlist: set[str] | None = No
     )
 
 
+def _cross_source_call_diagnostics(
+    source_asts: tuple[tuple[str, dict[str, Any]], ...],
+    evidence: list[SemanticRelationshipEvidence],
+) -> list[dict[str, Any]]:
+    """Observe call resolution and write forms without changing extraction behavior."""
+    functions: dict[int, tuple[dict[str, Any], str]] = {}
+    states: dict[int, str] = {}
+    source_local_functions: dict[str, set[int]] = {}
+    for source_key, ast in source_asts:
+        local_ids: set[int] = set()
+        for node in _walk_ast_nodes(ast):
+            node_id = node.get("id")
+            if node.get("nodeType") == "FunctionDefinition" and isinstance(node_id, int):
+                functions[node_id] = (node, source_key)
+                local_ids.add(node_id)
+            if (node.get("nodeType") == "VariableDeclaration"
+                    and node.get("stateVariable") is True
+                    and node.get("mutability", "mutable") not in {"constant", "immutable"}
+                    and isinstance(node_id, int) and isinstance(node.get("name"), str)):
+                states[node_id] = node["name"]
+        source_local_functions[source_key] = local_ids
+
+    def walk(node: Any):
+        if isinstance(node, dict):
+            if isinstance(node.get("nodeType"), str):
+                yield node
+            for value in node.values():
+                yield from walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                yield from walk(value)
+
+    def state_root(node: Any) -> str | None:
+        if not isinstance(node, dict):
+            return None
+        kind = node.get("nodeType")
+        if kind == "Identifier":
+            ref = node.get("referencedDeclaration")
+            return states.get(ref) if isinstance(ref, int) else None
+        if kind in {"IndexAccess", "IndexRangeAccess"}:
+            return state_root(node.get("baseExpression"))
+        if kind == "MemberAccess":
+            return state_root(node.get("expression"))
+        return None
+
+    rows: list[dict[str, Any]] = []
+    for source_key, ast in source_asts:
+        for caller in walk(ast):
+            if caller.get("nodeType") != "FunctionDefinition" or not isinstance(caller.get("id"), int):
+                continue
+            caller_id = caller["id"]
+            caller_name = caller.get("name") or caller.get("kind") or "anonymous"
+            caller_body = caller.get("body")
+            if not isinstance(caller_body, dict):
+                continue
+            for call in walk(caller_body):
+                if call.get("nodeType") != "FunctionCall":
+                    continue
+                expression = call.get("expression")
+                if not isinstance(expression, dict) or expression.get("nodeType") != "Identifier":
+                    continue
+                callee_id = expression.get("referencedDeclaration")
+                if not isinstance(callee_id, int):
+                    continue
+                found = functions.get(callee_id)
+                in_global_map = found is not None
+                callee = found[0] if found else {}
+                callee_source = found[1] if found else None
+                callee_body = callee.get("body") if isinstance(callee, dict) else None
+                # This reflects whether the existing per-AST propagation loop can
+                # enter this callee, not merely whether solc resolved its ID globally.
+                callee_body_entered = (
+                    in_global_map and callee_id in source_local_functions.get(source_key, set())
+                    and isinstance(callee_body, dict)
+                )
+                write_forms: list[dict[str, Any]] = []
+                writes_found: set[str] = set()
+                if isinstance(callee_body, dict):
+                    for item in walk(callee_body):
+                        kind = item.get("nodeType")
+                        if kind == "Assignment":
+                            lhs = item.get("leftHandSide")
+                            root = state_root(lhs)
+                            if root:
+                                writes_found.add(root)
+                                lhs_kind = lhs.get("nodeType") if isinstance(lhs, dict) else None
+                                write_forms.append({
+                                    "form": "nested_index_assignment" if lhs_kind == "IndexAccess" else
+                                            "member_assignment" if lhs_kind == "MemberAccess" else
+                                            "simple_assignment" if lhs_kind == "Identifier" else
+                                            "compound_lvalue_assignment",
+                                    "target": root,
+                                    "operator": item.get("operator"),
+                                    "lhs_node_type": lhs_kind,
+                                })
+                        elif kind == "FunctionCall":
+                            expr = item.get("expression")
+                            if isinstance(expr, dict) and expr.get("nodeType") == "MemberAccess" and expr.get("memberName") == "push":
+                                root = state_root(expr.get("expression"))
+                                if root:
+                                    writes_found.add(root)
+                                    write_forms.append({
+                                        "form": "array_push",
+                                        "target": root,
+                                        "member": "push",
+                                        "expression_node_type": (expr.get("expression") or {}).get("nodeType")
+                                            if isinstance(expr.get("expression"), dict) else None,
+                                    })
+                propagated = any(
+                    item.function_ast_node_id == caller_id
+                    and item.relation == "writes"
+                    and (item.metadata or {}).get("propagated_from_internal_call")
+                    for item in evidence
+                )
+                rows.append({
+                    "caller": str(caller_name),
+                    "caller_source": source_key,
+                    "callee": str(callee.get("name") or callee.get("kind") or "unknown"),
+                    "referenced_declaration": callee_id,
+                    "in_global_map": in_global_map,
+                    "callee_declaring_source": callee_source,
+                    "callee_body_entered": bool(callee_body_entered),
+                    "write_forms": write_forms,
+                    "writes_found": sorted(writes_found),
+                    "writes_propagated_to_caller": bool(propagated),
+                    "call_source_location": call.get("src"),
+                })
+    return rows
+
+
+def _walk_ast_nodes(node: Any):
+    if isinstance(node, dict):
+        if isinstance(node.get("nodeType"), str):
+            yield node
+        for value in node.values():
+            yield from _walk_ast_nodes(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from _walk_ast_nodes(value)
+
+
+def _persist_cross_source_call_diagnostics(rows: list[dict[str, Any]]) -> None:
+    """Append unique diagnostic rows to the campaign artifact directory."""
+    directory = os.environ.get("CYDRA_SOLC_DIAGNOSTIC_DIR")
+    if not directory or not rows:
+        return
+    path = Path(directory) / "cross-source-call-resolution.json"
+    existing: list[dict[str, Any]] = []
+    try:
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(parsed, list):
+            existing = parsed
+    except (OSError, json.JSONDecodeError):
+        pass
+    seen = {json.dumps(row, sort_keys=True) for row in existing}
+    for row in rows:
+        encoded = json.dumps(row, sort_keys=True)
+        if encoded not in seen:
+            existing.append(row)
+            seen.add(encoded)
+    path.write_text(json.dumps(existing, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def extract_state_effects_from_build_info(
     build_info: Path, source: Path, project: Path, source_allowlist: set[str] | None = None
 ) -> tuple[SemanticRelationshipEvidence, ...]:
     payload = json.loads(build_info.read_text(encoding="utf-8"))
+    source_asts = _source_asts(payload, source_allowlist)
     evidence: list[SemanticRelationshipEvidence] = []
-    for source_key, ast in _source_asts(payload, source_allowlist):
+    for source_key, ast in source_asts:
         evidence.extend(extract_ast_relationships(ast, source_key))
+    # Diagnostics are observational only: they do not feed back into evidence.
+    _persist_cross_source_call_diagnostics(_cross_source_call_diagnostics(source_asts, evidence))
     # A project can emit multiple build-info records that repeat imported sources.
     unique: dict[tuple[Any, ...], SemanticRelationshipEvidence] = {}
     for item in evidence:
