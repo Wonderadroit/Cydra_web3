@@ -281,7 +281,7 @@ def generate_access_control_hypotheses(
         for f, modifiers in declared
         if (not _lifecycle_modifiers(contract, f) and not _is_caller_scoped_write(contract, f)
             and not _has_caller_authorization_predicate(f)
-            and (not _authorization_modifiers(contract, f) or f.name in seeded_names))
+            and ((not modifiers) or (_authorization_modifiers(contract, f) and f.name in seeded_names)))
     )
 
 
