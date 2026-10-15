@@ -818,7 +818,7 @@ def main() -> int:
             # evidence needed to explain why the campaign stopped.
             if args.output:
                 args.output.parent.mkdir(parents=True, exist_ok=True)
-                args.output.write_text(json.dumps(_json(payload), indent=2) + "\\n", encoding="utf-8")
+                args.output.write_text(json.dumps(_json(payload), indent=2) + "\n", encoding="utf-8")
             if outcome.benchmark_status != args.expected_status:
                 return 2
             if args.require_ready and outcome.benchmark_status=="confirmed":
