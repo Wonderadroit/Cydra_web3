@@ -53,7 +53,13 @@ def _prepare_isolated_foundry_project(target_root: Path, source: Path, destinati
             destination_file = src_root / relative
         except ValueError:
             relative = current.relative_to(target_root)
-            destination_file = destination / "src" / relative
+            # npm packages must remain at the isolated Foundry root because
+            # remappings such as @openzeppelin/=node_modules/@openzeppelin/
+            # resolve from there. Other dependency trees are staged under src/.
+            if relative.parts and relative.parts[0] == "node_modules":
+                destination_file = destination / relative
+            else:
+                destination_file = src_root / relative
         if current in copied:
             continue
         copied.add(current)
@@ -89,10 +95,13 @@ def _prepare_isolated_foundry_project(target_root: Path, source: Path, destinati
 
     remapping_lines = []
     for prefix, destination_path in remappings:
-        # Remapped dependencies under node_modules live at the Foundry root;
-        # source-tree dependencies copied by the closure live under src/.
-        remapped_root = "node_modules" if destination_path.startswith("node_modules/") else "src"
-        remapping_lines.append(f"{prefix}={remapped_root}/{destination_path}")
+        # npm remapping destinations already include their root prefix. Do not
+        # prepend node_modules again; doing so creates node_modules/node_modules/...
+        # Non-npm dependencies copied into src/ need that staging prefix.
+        if destination_path.startswith("node_modules/"):
+            remapping_lines.append(f"{prefix}={destination_path}")
+        else:
+            remapping_lines.append(f"{prefix}=src/{destination_path}")
     remapping_literal = ", ".join(repr(item) for item in remapping_lines)
     (destination / "foundry.toml").write_text(
         '[profile.default]\n'
