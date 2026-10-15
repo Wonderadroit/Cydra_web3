@@ -423,6 +423,56 @@ def _json(v):
     return v
 
 
+def _seed_diagnostic(function, contract, seeds):
+    """Expose the decision and blocker used for this effective public surface."""
+    matching = [
+        seed for seed in seeds
+        if seed.target_contract == contract.name
+        and seed.target_function == function.name
+        and seed.source_line == function.line
+    ]
+    if not matching:
+        return {
+            "body_scope": function.body_scope,
+            "seed_decision": "not_evaluated:no_seed_trigger",
+            "blocking_reason_code": "no_seed_trigger",
+        }
+
+    seed = matching[0]
+    if seed.status != "blocked":
+        return {
+            "body_scope": function.body_scope,
+            "seed_decision": "produced",
+            "blocking_reason_code": None,
+        }
+
+    provenance = " ".join(seed.provenance)
+    if "blocked:signature_authorization_unsupported" in provenance:
+        reason = "signature_authorization_unsupported"
+    elif "blocked:delegatecall_storage_context_unmodeled" in provenance:
+        reason = "delegatecall_storage_context_unmodeled"
+    elif "blocked:internal_overload_ambiguous" in provenance:
+        reason = "internal_overload_ambiguous"
+    elif "blocked:low_level_call_target_unresolved" in provenance:
+        reason = "low_level_call_target_unresolved"
+    elif "blocked:callee_body_out_of_scope" in provenance or function.body_scope == "out_of_scope":
+        reason = "callee_body_out_of_scope"
+    elif "blocked:source_body_unavailable" in provenance:
+        reason = "source_body_unavailable"
+    elif "unresolved_path:_execute:callee_effect_or_authorization_unclassified" in provenance:
+        reason = "unresolved_callee_effects"
+    elif "blocked:" in provenance:
+        reason = next((part.split("blocked:", 1)[1].split()[0] for part in provenance.split() if "blocked:" in part), "blocked_preconditions_unresolved")
+    else:
+        reason = "blocked_preconditions_unresolved"
+
+    return {
+        "body_scope": function.body_scope,
+        "seed_decision": f"blocked:{reason}",
+        "blocking_reason_code": reason,
+    }
+
+
 def _no_hypothesis_payload(target, compiler, result, related_intent_parity_hypotheses=()):
     """Preserve no-auth and unsupported-related-hypothesis outcomes without calling either a finding."""
     related = _json(related_intent_parity_hypotheses)
@@ -512,6 +562,7 @@ def _no_hypothesis_payload(target, compiler, result, related_intent_parity_hypot
                         ),
                         "writes": list(function.writes),
                         "declaring_source": function.source or contract.source,
+                        **_seed_diagnostic(function, contract, getattr(result, "seeds", ())),
                     }
                     for function in contract.functions
                 ],
@@ -528,6 +579,7 @@ def _no_hypothesis_payload(target, compiler, result, related_intent_parity_hypot
                 "writes": list(function.writes),
                 "declaring_source": function.source or "unknown",
                 "source_line": function.line,
+                **_seed_diagnostic(function, contract, getattr(result, "seeds", ())),
                 "is_finding": False,
             }
             for contract in result.contracts
