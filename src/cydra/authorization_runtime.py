@@ -55,7 +55,17 @@ def classify_authorization_blind_execution(
         semantics = "unauthorized_authority_gain"
         internal_status, benchmark_status = "confirmed", "confirmed"
     elif verdict == "rejected":
-        semantics = "authority_gain_not_observed"
+        semantics = (
+            "authorization_guard_held"
+            if hypothesis.hypothesis_class == "guard_verification"
+            else "unexpected_guard_or_authority_gain_not_observed"
+        )
+        if verdict_reason is None:
+            verdict_reason = (
+                "authorization_guard_held"
+                if hypothesis.hypothesis_class == "guard_verification"
+                else "authority_gain_not_observed"
+            )
         internal_status, benchmark_status = "rejected", "not_confirmed"
     elif verdict == "inconclusive":
         semantics = "experiment_inconclusive"
@@ -98,6 +108,8 @@ def classify_authorization_blind_execution(
         internal_status,
         hypothesis.evidence_ids + (evidence_id,),
         hypothesis.related_functions,
+        hypothesis.potential_impact,
+        hypothesis.hypothesis_class,
     )
     return AuthorizationBlindOutcome(
         updated, execution, evidence, internal_status, benchmark_status, verdict, verdict_reason
