@@ -782,6 +782,13 @@ def main() -> int:
                     f"classification={outcome.benchmark_status} evidence={outcome.evidence.evidence_id}"
                 )
                 return 2
+            # Preserve the exact generated source outside the temporary isolated
+            # project so the workflow artifact contains what Foundry actually ran.
+            # Keep this adjacent to the structured campaign JSON output.
+            if args.output:
+                generated_artifact = args.output.with_name("authorization-campaign.generated.t.sol")
+                generated_artifact.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(generated, generated_artifact)
             execution = run_foundry_test(execution_project, generated, experiment.experiment_id, "blind")
             print("EXECUTION_STATUS", execution.status, "exit=", execution.exit_code, "tests=", execution.tests_run, "failed=", execution.tests_failed)
             print(execution.stdout)
