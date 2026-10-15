@@ -803,9 +803,24 @@ def main() -> int:
                 f"{hypothesis.hypothesis_id}: status={execution.status} "
                 f"classification={outcome.benchmark_status} evidence={outcome.evidence.evidence_id}"
             )
+            payload = {
+                "target": f"{args.target_repo}@{args.target_ref}:{args.target_path}",
+                "hypothesis_seeds": _json(getattr(result, "seeds", ())),
+                "hypothesis": _json(hypothesis),
+                "experiment": _json(experiment),
+                "dependency_materialization": dependency_materialization,
+                "blind_execution": _json(execution),
+                "classification": outcome.benchmark_status,
+                "finding_gate": "NOT_READY",
+            }
+            # Persist the structured execution record before any policy gate can
+            # return non-zero. A failed readiness/status gate must not erase the
+            # evidence needed to explain why the campaign stopped.
+            if args.output:
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                args.output.write_text(json.dumps(_json(payload), indent=2) + "\\n", encoding="utf-8")
             if outcome.benchmark_status != args.expected_status:
                 return 2
-            payload={"target":f"{args.target_repo}@{args.target_ref}:{args.target_path}","hypothesis_seeds":_json(getattr(result, "seeds", ())),"hypothesis":_json(hypothesis),"experiment":_json(experiment),"dependency_materialization":dependency_materialization,"blind_execution":_json(execution),"classification":outcome.benchmark_status,"finding_gate":"CONFIRMED_ONLY"}
             if args.require_ready and outcome.benchmark_status=="confirmed":
                 isolated_source = execution_project / "src" / source_relative
                 auth_context = "\n".join(
