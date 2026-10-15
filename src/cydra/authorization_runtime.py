@@ -58,13 +58,13 @@ def classify_authorization_blind_execution(
         semantics = (
             "authorization_guard_held"
             if hypothesis.hypothesis_class == "guard_verification"
-            else "unexpected_guard_or_authority_gain_not_observed"
+            else "unexpected_guard_held"
         )
         if verdict_reason is None:
             verdict_reason = (
                 "authorization_guard_held"
                 if hypothesis.hypothesis_class == "guard_verification"
-                else "authority_gain_not_observed"
+                else "unexpected_guard_held"
             )
         internal_status, benchmark_status = "rejected", "not_confirmed"
     elif verdict == "inconclusive":
