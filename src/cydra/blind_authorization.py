@@ -161,6 +161,17 @@ def generate_blind_authorization_test_from_experiment(
         ):
             role_getter = role_identifier
 
+    # Preserve the existing positive-control shape: a function that grants a
+    # role may have no onlyRole modifier argument of its own, yet the harness
+    # must still observe whether an unrelated caller gained DEFAULT_ADMIN_ROLE.
+    if role_getter is None and re.search(r"\bfunction\s+hasRole\s*\(", source_text):
+        default_admin = re.search(
+            r"\bbytes32\s+public\s+constant\s+(DEFAULT_ADMIN_ROLE)\s*=",
+            source_text,
+        )
+        if default_admin:
+            role_getter = default_admin.group(1)
+
     ownable_supported = bool(
         re.search(r"\bfunction\s+owner\s*\(\s*\)", source_text)
         and re.search(r"\bowner\s*\(\s*\)\s*(?:external|public)", source_text)
