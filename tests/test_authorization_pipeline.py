@@ -253,3 +253,43 @@ def test_modifier_restrictions_are_classified_structurally(tmp_path: Path):
     assert qux_seed.status == "blocked"
     assert "initialization_state" in qux_seed.preconditions_needed
     assert "qux" not in {item.target_function for item in result.hypotheses}
+
+
+def test_guarded_setter_seed_converts_to_guard_verification_experiment(tmp_path: Path):
+    source = tmp_path / "BaseEmissionsController.sol"
+    source.write_text(
+        "pragma solidity ^0.8.20;\n"
+        "contract BaseEmissionsController {\n"
+        "  bytes32 public constant TRUST_ROLE = keccak256('TRUST_ROLE');\n"
+        "  address public _TRUST_TOKEN;\n"
+        "  modifier onlyRole(bytes32 role) { _checkRole(role); _; }\n"
+        "  function _checkRole(bytes32) internal view { require(msg.sender == address(1), 'role'); }\n"
+        "  function setTrustToken(address token) external onlyRole(TRUST_ROLE) { _TRUST_TOKEN = token; }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    result = investigate_authorization(source, target="guarded-setter@pinned")
+    hypothesis = next(item for item in result.hypotheses if item.target_function == "setTrustToken")
+    experiment = next(item for item in result.experiments if item.hypothesis_id == hypothesis.hypothesis_id)
+    seed = next(item for item in result.seeds if item.target_function == "setTrustToken")
+    assert hypothesis.hypothesis_class == "guard_verification"
+    assert experiment.hypothesis_class == "guard_verification"
+    assert seed.conversion_attempted is True
+    assert seed.conversion_status == "converted"
+    assert seed.experiment_generated is True
+    assert seed.hypothesis_class == "guard_verification"
+
+
+def test_non_authorization_modifiers_do_not_route_guard_verification(tmp_path: Path):
+    source = tmp_path / "NonReentrantTarget.sol"
+    source.write_text(
+        "pragma solidity ^0.8.20;\n"
+        "contract NonReentrantTarget {\n"
+        "  uint256 public value;\n"
+        "  modifier nonReentrant() { _; }\n"
+        "  function setValue(uint256 next) external nonReentrant { value = next; }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    result = investigate_authorization(source, target="non-reentrant@pinned")
+    assert not any(item.hypothesis_class == "guard_verification" for item in result.hypotheses)
