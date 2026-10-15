@@ -680,7 +680,7 @@ def parse_solidity(path: str | Path, *, include_inherited: bool = True) -> tuple
             modifiers = tuple(modifier_tokens)
             modifier_arguments = []
             for modifier_name in modifiers:
-                invocation = re.search(rf"\\b{re.escape(modifier_name)}\\b\\s*\\(", signature_tail)
+                invocation = re.search(rf"\b{re.escape(modifier_name)}\b\s*\(", signature_tail)
                 if invocation is not None:
                     span = _balanced_parenthesized_span(signature_tail, invocation.end() - 1)
                     if span is not None:
