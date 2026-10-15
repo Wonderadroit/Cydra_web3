@@ -118,6 +118,7 @@ def generate_blind_authorization_test_from_experiment(
     # The identifier is read through the deployed contract's public constant
     # getter, so keccak256 role values are never reconstructed from their names.
     role_getter = None
+    role_guard_shape = False
     role_invocation = next(
         (
             arguments
@@ -160,6 +161,7 @@ def generate_blind_authorization_test_from_experiment(
             role_constant_declared or inherited_default_admin
         ):
             role_getter = role_identifier
+            role_guard_shape = True
 
     # Preserve the existing positive-control shape: a function that grants a
     # role may have no onlyRole modifier argument of its own, yet the harness
@@ -208,13 +210,26 @@ def generate_blind_authorization_test_from_experiment(
         post_observation = (
             f"        bool hasRoleAfter = target.hasRole(target.{role_getter}(), address(attacker));"
         )
-        verdict_logic = f'''        if (!ok) {{
-            if (hadRoleBefore != hasRoleAfter) verdict = Verdict.Inconclusive;
-            else if (_isAccessControlUnauthorized(returnData)) verdict = Verdict.Rejected;
-            else if (bytes(expectedGuard).length > 0 && keccak256(bytes(_revertReason(returnData))) == keccak256(bytes(expectedGuard))) verdict = Verdict.Rejected;
-            else verdict = Verdict.Inconclusive;
-        }} else if (!hadRoleBefore) verdict = Verdict.Supported;
-        else verdict = Verdict.Inconclusive;'''
+        if role_guard_shape:
+            verdict_logic = f'''        if (!ok) {{
+                if (hadRoleBefore != hasRoleAfter) verdict = Verdict.Inconclusive;
+                else if (_isAccessControlUnauthorized(returnData)) verdict = Verdict.Rejected;
+                else if (bytes(expectedGuard).length > 0 && keccak256(bytes(_revertReason(returnData))) == keccak256(bytes(expectedGuard))) verdict = Verdict.Rejected;
+                else verdict = Verdict.Inconclusive;
+            }} else if (!hadRoleBefore) verdict = Verdict.Supported;
+            else verdict = Verdict.Inconclusive;'''
+        else:
+            # Legacy authority-delta shape: test whether the call itself granted
+            # the caller a role, rather than treating any successful call as a
+            # missing guard.
+            verdict_logic = f'''        if (!ok) {{
+                if (hadRoleBefore != hasRoleAfter) verdict = Verdict.Inconclusive;
+                else if (bytes(expectedGuard).length == 0) verdict = Verdict.Unmeasurable;
+                else if (keccak256(bytes(_revertReason(returnData))) == keccak256(bytes(expectedGuard))) verdict = Verdict.Rejected;
+                else verdict = Verdict.Inconclusive;
+            }} else if (!hadRoleBefore && hasRoleAfter) verdict = Verdict.Supported;
+            else if (hadRoleBefore == hasRoleAfter) verdict = Verdict.Rejected;
+            else verdict = Verdict.Inconclusive;'''
     elif ownable_supported:
         before_observation = "        address ownerBefore = target.owner();"
         post_observation = "        address ownerAfter = target.owner();"
