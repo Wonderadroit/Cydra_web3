@@ -2,7 +2,7 @@ name: Python Regression
 
 on:
   push:
-    branches: [main, "migration/**", "fix/**"]
+    branches: [main, "migration/**", "fix/**", "feat/guard-verification-routing"]
   pull_request:
   workflow_dispatch:
 

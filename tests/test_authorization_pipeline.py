@@ -24,7 +24,9 @@ def test_authorization_investigation_is_scoped_to_authorization(tmp_path: Path):
     assert result.target == "fixture@pinned"
     assert result.status in {"HYPOTHESES_READY", "NO_AUTH_HYPOTHESIS"}
     assert all(item.invariant_id == "INV-AUTH-001" for item in result.hypotheses)
-    assert {item.hypothesis_id for item in result.hypotheses} <= {"H-AUTH-setOperator"}
+    assert {item.hypothesis_id for item in result.hypotheses} == {"H-AUTH-setOperator", "H-AUTH-setTreasury"}
+    classes = {item.target_function: item.hypothesis_class for item in result.hypotheses}
+    assert classes == {"setOperator": "unguarded_setter", "setTreasury": "guard_verification"}
     assert len(result.experiments) == len(result.hypotheses)
 
 
@@ -243,13 +245,53 @@ def test_modifier_restrictions_are_classified_structurally(tmp_path: Path):
     assert modifier_restriction_category(contract, functions["baz"], "onlyOwner") == "authorization"
     assert modifier_restriction_category(contract, functions["qux"], "onlyInitializing") == "lifecycle"
 
-    # Reentrancy protection is not mistaken for caller authorization.
-    assert "foo" in {item.target_function for item in result.hypotheses}
-    # A caller-identity guard suppresses the hypothesis even alongside nonReentrant.
-    assert "bar" not in {item.target_function for item in result.hypotheses}
-    assert "baz" not in {item.target_function for item in result.hypotheses}
+    # Non-authorization modifiers do not enter either candidate route.
+    assert "foo" not in {item.target_function for item in result.hypotheses}
+    # Caller-authorization modifiers route to guard verification, including when combined with nonReentrant.
+    assert {item.target_function for item in result.hypotheses} == {"bar", "baz"}
+    assert all(item.hypothesis_class == "guard_verification" for item in result.hypotheses)
     # Lifecycle-only surfaces remain honest blocked seeds, not authorization hypotheses.
     qux_seed = next(item for item in result.seeds if item.target_function == "qux")
     assert qux_seed.status == "blocked"
     assert "initialization_state" in qux_seed.preconditions_needed
     assert "qux" not in {item.target_function for item in result.hypotheses}
+
+
+def test_guarded_setter_seed_converts_to_guard_verification_experiment(tmp_path: Path):
+    source = tmp_path / "BaseEmissionsController.sol"
+    source.write_text(
+        "pragma solidity ^0.8.20;\n"
+        "contract BaseEmissionsController {\n"
+        "  bytes32 public constant TRUST_ROLE = keccak256('TRUST_ROLE');\n"
+        "  address public _TRUST_TOKEN;\n"
+        "  modifier onlyRole(bytes32 role) { _checkRole(role); _; }\n"
+        "  function _checkRole(bytes32) internal view { require(msg.sender == address(1), 'role'); }\n"
+        "  function setTrustToken(address token) external onlyRole(TRUST_ROLE) { _TRUST_TOKEN = token; }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    result = investigate_authorization(source, target="guarded-setter@pinned")
+    hypothesis = next(item for item in result.hypotheses if item.target_function == "setTrustToken")
+    experiment = next(item for item in result.experiments if item.hypothesis_id == hypothesis.hypothesis_id)
+    seed = next(item for item in result.seeds if item.target_function == "setTrustToken")
+    assert hypothesis.hypothesis_class == "guard_verification"
+    assert experiment.hypothesis_class == "guard_verification"
+    assert seed.conversion_attempted is True
+    assert seed.conversion_status == "converted"
+    assert seed.experiment_generated is True
+    assert seed.hypothesis_class == "guard_verification"
+
+
+def test_non_authorization_modifiers_do_not_route_guard_verification(tmp_path: Path):
+    source = tmp_path / "NonReentrantTarget.sol"
+    source.write_text(
+        "pragma solidity ^0.8.20;\n"
+        "contract NonReentrantTarget {\n"
+        "  uint256 public value;\n"
+        "  modifier nonReentrant() { _; }\n"
+        "  function setValue(uint256 next) external nonReentrant { value = next; }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    result = investigate_authorization(source, target="non-reentrant@pinned")
+    assert not any(item.target_function == "setValue" for item in result.hypotheses)

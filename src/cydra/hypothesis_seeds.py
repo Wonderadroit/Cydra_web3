@@ -31,6 +31,11 @@ class HypothesisSeed:
     provenance: tuple[str, ...]
     uncertainty: tuple[str, ...]
     analysis_budget: str = ANALYSIS_BUDGET
+    conversion_attempted: bool = False
+    conversion_status: str = "not_attempted"
+    rejection_reason: str | None = None
+    experiment_generated: bool = False
+    hypothesis_class: str | None = None
 
 
 def _is_lifecycle_surface(contract: ContractModel, function: FunctionModel) -> bool:

@@ -79,6 +79,11 @@ def modifier_restriction_category(
         return "other"
     body = _modifier_body(_strip_signature_comments(source), modifier)
     if body is None:
+        # Exact conventional names for inherited authorization modifiers.
+        if modifier.lower() in {"onlyowner", "onlyrole", "hasrole", "onlyadmin", "onlymanager", "onlygovernance", "onlygov"}:
+            return "authorization"
+        if modifier.lower() in {"onlyinitializing", "initializer", "reinitializer"} or modifier.lower().startswith("reinitializer"):
+            return "lifecycle"
         return "other"
     related_bodies = (body,) + _one_level_called_bodies(source, body)
     if any(_CALLER_TOKEN_RE.search(candidate) for candidate in related_bodies):
@@ -265,9 +270,18 @@ def generate_access_control_hypotheses(
     else:
         invariant = access_control_invariant(contract)
     return tuple(
-        Hypothesis(f"H-AUTH-{f.name}", f"{f.name} may permit an unauthorized caller to mutate privileged state.", invariant.invariant_id, f.name, "arbitrary external caller", "privileged configuration or authorization state can be changed", evidence_ids=(f"E-MODEL-{f.name}",))
+        Hypothesis(
+            f"H-AUTH-{f.name}",
+            (f"{f.name} authorization guard may fail to reject an unauthorized caller." if _authorization_modifiers(contract, f) else f"{f.name} may permit an unauthorized caller to mutate privileged state."),
+            invariant.invariant_id, f.name, "arbitrary external caller",
+            "privileged configuration or authorization state can be changed",
+            evidence_ids=(f"E-MODEL-{f.name}",),
+            hypothesis_class=("guard_verification" if _authorization_modifiers(contract, f) else "unguarded_setter"),
+        )
         for f, modifiers in declared
-        if not _authorization_modifiers(contract, f) and not _lifecycle_modifiers(contract, f) and not _is_caller_scoped_write(contract, f) and not _has_caller_authorization_predicate(f)
+        if (not _lifecycle_modifiers(contract, f) and not _is_caller_scoped_write(contract, f)
+            and not _has_caller_authorization_predicate(f)
+            and ((not modifiers) or (_authorization_modifiers(contract, f) and f.name in seeded_names)))
     )
 
 
@@ -324,12 +338,13 @@ def generate_weighted_average_rounding_hypotheses(contract: ContractModel) -> tu
 
 
 def plan_access_control_experiment(hypothesis: Hypothesis) -> Experiment:
-    return _plan_experiment(
+    from dataclasses import replace
+    return replace(_plan_experiment(
         hypothesis,
         f"Execute {hypothesis.target_function} from an unprivileged actor and assert that the privileged state does not change; then repeat against the patched version.",
         ("missing authorization is exploitable", "authorization is enforced elsewhere"),
         1.0,
-    )
+    ), hypothesis_class=hypothesis.hypothesis_class)
 
 
 def plan_initialization_experiment(hypothesis: Hypothesis) -> Experiment:

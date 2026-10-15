@@ -112,6 +112,7 @@ class Hypothesis:
     # peer functions from prose or benchmark-specific names.
     related_functions: tuple[str, ...] = field(default_factory=tuple)
     potential_impact: str = "UNKNOWN"
+    hypothesis_class: Literal["unguarded_setter", "guard_verification"] = "unguarded_setter"
 
 
 @dataclass(frozen=True)
@@ -140,6 +141,7 @@ class Experiment:
     # this is empty; generic sequence renderers consume it without knowing a
     # vulnerability class.
     steps: tuple[ExperimentStep, ...] = field(default_factory=tuple)
+    hypothesis_class: Literal["unguarded_setter", "guard_verification"] = "unguarded_setter"
 
 
 @dataclass(frozen=True)

@@ -170,6 +170,9 @@ def investigate_authorization(
     unique = {item.hypothesis_id: item for item in hypotheses}
     ordered = tuple(unique[key] for key in sorted(unique))
     experiments = tuple(plan_access_control_experiment(item) for item in ordered)
+    hypothesis_by_function = {item.target_function: item for item in ordered}
+    experiment_functions = {item.target_function for item in experiments if item.target_function}
+    dispositioned_seeds = tuple(replace(seed, conversion_attempted=(seed.status in {"seed", "testable"} and bool(seed.observed_writes)), conversion_status=("converted" if seed.target_function in hypothesis_by_function else "blocked" if seed.status == "blocked" else "rejected"), rejection_reason=(None if seed.target_function in hypothesis_by_function else "seed_blocked_or_missing_modeled_writes" if seed.status == "blocked" or not seed.observed_writes else "no_eligible_authorization_candidate_after_modifier_classification"), experiment_generated=seed.target_function in hypothesis_by_function, hypothesis_class=(hypothesis_by_function[seed.target_function].hypothesis_class if seed.target_function in hypothesis_by_function else None)) for seed in seeds)
     invariant = (Invariant(
         "INV-AUTH-001",
         "Externally callable operations that mutate privileged state must enforce the target's authorization boundary.",
@@ -184,5 +187,5 @@ def investigate_authorization(
         experiments=experiments,
         status="HYPOTHESES_READY" if ordered else "NO_AUTH_HYPOTHESIS",
         derived_effects=tuple(derived),
-        seeds=seeds,
+        seeds=dispositioned_seeds,
     )
