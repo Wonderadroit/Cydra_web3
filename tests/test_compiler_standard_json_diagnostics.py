@@ -60,3 +60,22 @@ def test_fatal_standard_json_diagnostics_preserve_partial_asts(tmp_path, monkeyp
     assert result["fatal_errors"]
     assert result["sources_parsed"] == ["Entry.sol"]
     assert result["target_source_present"] is True
+
+
+def test_remapping_import_resolves_to_normalized_source_unit(tmp_path):
+    from cydra.compiler_standard_json import _closure
+
+    entry = tmp_path / "contracts" / "Entry.sol"
+    entry.parent.mkdir()
+    entry.write_text(
+        'pragma solidity ^0.8.20; import "@local/Thing.sol"; contract Entry is Thing {}',
+        encoding="utf-8",
+    )
+    (tmp_path / "remappings.txt").write_text("@local/=lib/\n", encoding="utf-8")
+    dependency = tmp_path / "lib" / "Thing.sol"
+    dependency.parent.mkdir()
+    dependency.write_text("pragma solidity ^0.8.20; contract Thing {}", encoding="utf-8")
+
+    sources, unresolved = _closure(tmp_path, entry)
+    assert unresolved == []
+    assert "lib/Thing.sol" in sources
