@@ -66,3 +66,12 @@ A passing assertion is not evidence of correct authorization unless the experime
 For a five-minute structural screen, inspect the implementation and its inheritance chain for `_disableInitializers`, initializer modifiers/functions, and `UUPSUpgradeable`. Their presence is a warning to inspect deployment/setup requirements, not an automatic vulnerability verdict. Their absence is necessary for this fast path, but not sufficient: still verify direct deployability, caller-based guard, setter state effect, and any constructor/configuration prerequisites against the pinned source.
 
 Prioritize candidate families with a plausible standalone shape: token contracts with `setMinter`/`setFee`/`setTreasury`; small registries with `register`/`deregister`/`setFee`; older pre-proxy factory contracts; governance helper contracts adjacent to (but not the timelock itself); and standalone AMO/strategy contracts. Verify the live bounty scope and exact target repository/ref before campaign execution. This structural filter is a target-selection contract, not evidence that a candidate is vulnerable.
+
+
+### Constructor dependency filter — conservative for this cycle
+
+For the current supported-class campaign cycle, reject any target whose constructor takes a contract-address argument. This is intentionally conservative: do not spend a live campaign run discovering that deployment depends on a companion contract or protocol state.
+
+Future refinement (not enabled for this cycle): distinguish mockable standard-interface dependencies from protocol-specific dependencies. A constructor dependency typed as a standard token interface (for example, `IERC20` or `IERC721`) may be satisfiable by deploying a local mock token. A protocol-specific dependency (for example, a staker, factory, registry, beacon, or other stateful protocol contract) may require its own deployment, ownership, configuration, or state and should be rejected unless those preconditions are explicitly supported and reproduced.
+
+For this cycle, the rule remains simple: **no contract-address constructor arguments**. Primitive constructor arguments are acceptable only when the resulting deployment and setter preconditions can be established deterministically. A no-argument constructor that initializes ownership to `msg.sender` (for example, `Ownable(msg.sender)`) is an especially good fit. Prefer one or two simple caller-guarded setters with clear state effects and no proxy or companion-contract setup.
