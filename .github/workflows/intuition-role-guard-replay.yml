@@ -1,0 +1,55 @@
+name: CYDRA Intuition Role Guard Measurement Replay
+
+on:
+  push:
+    branches: [fix/accesscontrol-role-authority-measurement]
+
+permissions:
+  contents: read
+
+jobs:
+  campaign:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: foundry-rs/foundry-toolchain@v1
+      - run: python -m pip install --upgrade pip pytest
+      - run: python -m pip install -e .
+      - name: Record immutable target intake
+        run: |
+          {
+            echo "Program scope URL: https://cantina.xyz/bounties/acca29a4-d405-4405-a3b3-8c3feb10d1e3"
+            echo "Target repository: https://github.com/code-423n4/2026-03-intuition"
+            echo "Target revision: 314b7d4d9ccbaf27e4484a6c0706af83d3f75f36"
+            echo "Target source path: src/protocol/emissions/BaseEmissionsController.sol"
+            echo "Execution: local source checkout and isolated Foundry tests only"
+            echo "External transactions: not performed"
+          } | tee "$RUNNER_TEMP/target-intake.txt"
+      - name: Run measurement-only campaign
+        env:
+          PYTHONPATH: src
+        run: |
+          set -o pipefail
+          python scripts/run_authorization_campaign.py \
+            --target-repo "https://github.com/code-423n4/2026-03-intuition" \
+            --target-ref "314b7d4d9ccbaf27e4484a6c0706af83d3f75f36" \
+            --target-path "src/protocol/emissions/BaseEmissionsController.sol" \
+            --target-project "." \
+            --measurement-only \
+            --output "$RUNNER_TEMP/authorization-campaign.json" \
+            2>&1 | tee "$RUNNER_TEMP/authorization-campaign.log"
+      - name: Upload campaign evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cydra-intuition-role-guard-replay
+          path: |
+            ${{ runner.temp }}/target-intake.txt
+            ${{ runner.temp }}/authorization-campaign.json
+            ${{ runner.temp }}/authorization-campaign.log
+          if-no-files-found: warn
+          retention-days: 14
