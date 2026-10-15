@@ -108,6 +108,9 @@ def test_isolated_foundry_staging_supports_five_dependency_layouts(
     )
     _write(target / "remappings.txt", remappings)
     for relative, content in dependencies.items():
+        # npm files must be absent until the simulated lockfile install runs.
+        if relative.startswith("node_modules/") and layout in {"npm-package", "mixed-npm-and-lib"}:
+            continue
         _write(target / relative, content)
 
     if layout in {"npm-package", "mixed-npm-and-lib"}:
