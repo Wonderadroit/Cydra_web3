@@ -155,7 +155,10 @@ def compile_standard_json(project: Path, entry: Path) -> dict[str, Any]:
     config = project / "hardhat.config.js"
     if config.is_file():
         try:
-            match = re.search(r"""solidity\s*:\s*['"]([0-9]+\.[0-9]+\.[0-9]+)['"]""", config.read_text(encoding="utf-8"))
+            config_text = config.read_text(encoding="utf-8")
+            match = re.search(r"""solidity\b[\s\S]{0,500}?version\s*:\s*['"]([0-9]+\.[0-9]+\.[0-9]+)['"]""", config_text)
+            if not match:
+                match = re.search(r"""solidity\s*:\s*['"]([0-9]+\.[0-9]+\.[0-9]+)['"]""", config_text)
             requested = match.group(1) if match else None
         except OSError:
             pass
