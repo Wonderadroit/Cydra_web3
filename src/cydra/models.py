@@ -49,6 +49,9 @@ class FunctionModel:
     writes: tuple[str, ...]
     external_calls: tuple[str, ...]
     line: int
+    # Exact modifier call arguments, e.g. ("onlyRole", ("CONTROLLER_ROLE",)).
+    # Preserve expressions as source syntax; do not guess their evaluated values.
+    modifier_arguments: tuple[tuple[str, tuple[str, ...]], ...] = field(default_factory=tuple)
     parameters: tuple[ParameterModel, ...] = field(default_factory=tuple)
     authorization_predicates: tuple[str, ...] = field(default_factory=tuple)
     state_predicates: tuple[str, ...] = field(default_factory=tuple)
