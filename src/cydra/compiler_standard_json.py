@@ -191,11 +191,21 @@ def compile_standard_json(project: Path, entry: Path) -> dict[str, Any]:
     try:
         output = solcx.compile_standard(input_json, solc_version=version, allow_paths=str(project.resolve()))
     except Exception as exc:
-        message = _redact(str(exc))
-        return {"status": "compile_failed", "solc_version_used": version, "errors_count": 1,
-                "fatal_errors": [message], "sources_parsed": [], "target_source_present": False,
-                "stderr_excerpt": message, "process_exit_status": None, "unresolved_imports": [],
-                "source_dependency_count": len(contents), "compiler_command": ["solcx.compile_standard", "--version", version]}
+        # py-solc-x can raise for fatal diagnostics while retaining Standard JSON
+        # on stdout_data. Preserve partial source ASTs when the compiler emitted them.
+        raw_stdout = getattr(exc, "stdout_data", None)
+        if isinstance(raw_stdout, bytes):
+            raw_stdout = raw_stdout.decode("utf-8", errors="replace")
+        try:
+            output = json.loads(raw_stdout) if isinstance(raw_stdout, str) else None
+        except json.JSONDecodeError:
+            output = None
+        if not isinstance(output, dict):
+            message = _redact(str(exc))
+            return {"status": "compile_failed", "solc_version_used": version, "errors_count": 1,
+                    "fatal_errors": [message], "sources_parsed": [], "target_source_present": False,
+                    "stderr_excerpt": message, "process_exit_status": None, "unresolved_imports": [],
+                    "source_dependency_count": len(contents), "compiler_command": ["solcx.compile_standard", "--version", version]}
     errors = output.get("errors", []) if isinstance(output, dict) else []
     fatal = [item for item in errors if isinstance(item, dict) and item.get("severity") == "error"]
     parsed = output.get("sources", {}) if isinstance(output, dict) else {}
