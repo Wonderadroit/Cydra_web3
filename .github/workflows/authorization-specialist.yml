@@ -127,5 +127,6 @@ jobs:
             ${{ runner.temp }}/authorization-campaign.log
             ${{ runner.temp }}/solc-input-keys.json
             ${{ runner.temp }}/solc-errors.json
+            ${{ runner.temp }}/cross-source-call-resolution.json
           if-no-files-found: warn
           retention-days: 14
