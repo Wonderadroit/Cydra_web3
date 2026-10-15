@@ -563,7 +563,7 @@ def main() -> int:
                 if args.output:
                     args.output.parent.mkdir(parents=True, exist_ok=True)
                     args.output.write_text(
-                        json.dumps(_json(payload), indent=2) + "\\n",
+                        json.dumps(_json(payload), indent=2) + "\n",
                         encoding="utf-8",
                     )
                 print(
@@ -627,7 +627,7 @@ def main() -> int:
                 "verdicts": verdict_records,
                 "finding_gate": "NOT_READY",
             }
-            args.output.write_text(json.dumps(_json(campaign_payload), indent=2) + "\\n", encoding="utf-8")
+            args.output.write_text(json.dumps(_json(campaign_payload), indent=2) + "\n", encoding="utf-8")
         return 2 if campaign_failed else 0
 
 
