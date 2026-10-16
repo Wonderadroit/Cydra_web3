@@ -255,6 +255,13 @@ def _prepare_isolated_foundry_project(target_root: Path, source: Path, destinati
     remappings.sort(key=lambda item: len(item[0]), reverse=True)
     generated_remappings: dict[str, str] = {}
 
+    def in_checkout(path: Path) -> bool:
+        try:
+            path.resolve().relative_to(target_root.resolve())
+            return True
+        except ValueError:
+            return False
+
     def staged_path(path: Path) -> Path:
         """Map a pinned-checkout file to its deterministic isolated-project path."""
         resolved = path.resolve()
@@ -279,13 +286,13 @@ def _prepare_isolated_foundry_project(target_root: Path, source: Path, destinati
         # 1. Solidity relative import: resolve from the importing source file.
         if imported.startswith("."):
             candidate = (importer.parent / imported).resolve()
-            return candidate if candidate.is_file() else None
+            return candidate if in_checkout(candidate) and candidate.is_file() else None
 
         # 2. Explicit project remappings, longest prefix first.
         for prefix, destination_path in remappings:
             if imported.startswith(prefix):
                 candidate = (target_root / destination_path / imported[len(prefix):]).resolve()
-                if candidate.is_file():
+                if in_checkout(candidate) and candidate.is_file():
                     return candidate
                 # A matching remapping is authoritative; don't silently bypass it.
                 return None
@@ -293,19 +300,19 @@ def _prepare_isolated_foundry_project(target_root: Path, source: Path, destinati
         # 3. Standard npm resolution works with scoped and unscoped packages,
         # even when the target has no remappings.txt.
         package_candidate = (target_root / "node_modules" / imported).resolve()
-        if package_candidate.is_file():
+        if in_checkout(package_candidate) and package_candidate.is_file():
             parts = imported.split("/")
             package_parts = parts[:2] if parts[0].startswith("@") and len(parts) >= 2 else parts[:1]
             package_prefix = "/".join(package_parts).rstrip("/") + "/"
             package_directory = target_root / "node_modules" / Path(*package_parts)
-            add_generated_remapping(package_prefix, package_directory)
+            add_generated_remapping(package_prefix, staged_path(package_directory))
             return package_candidate
 
         # 4. Project-root-relative import, including contracts/, src/, and
         # repository-local vendor layouts. Derive a remapping to the staged path
         # so the original import string remains valid after relocation.
         project_candidate = (target_root / imported).resolve()
-        if project_candidate.is_file():
+        if in_checkout(project_candidate) and project_candidate.is_file():
             parts = imported.split("/")
             prefix = parts[0].rstrip("/") + "/"
             root_directory = (target_root / parts[0]).resolve()
