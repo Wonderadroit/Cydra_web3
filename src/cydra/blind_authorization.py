@@ -168,15 +168,15 @@ def generate_blind_authorization_test_from_experiment(
         parameter_base = parameter.type.split()[0]
         if parameter_base != state_base:
             continue
-        if state_base == "address":
-            mutable_value = (
-                f"address nextValue = address(0xBEEF);\\n"
-                f"        if (nextValue == target.{state_getter}()) nextValue = address(0xF00D);"
-            )
-        elif state_base == "address" and state_type == "address payable":
+        if state_type == "address payable":
             mutable_value = (
                 f"address payable nextValue = payable(address(0xBEEF));\\n"
                 f"        if (nextValue == target.{state_getter}()) nextValue = payable(address(0xF00D));"
+            )
+        elif state_base == "address":
+            mutable_value = (
+                f"address nextValue = address(0xBEEF);\\n"
+                f"        if (nextValue == target.{state_getter}()) nextValue = address(0xF00D);"
             )
         elif state_base == "bool":
             mutable_value = f"bool nextValue = !target.{state_getter}();"
