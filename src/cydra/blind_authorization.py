@@ -153,11 +153,6 @@ def generate_blind_authorization_test_from_experiment(
             ):
                 principal = candidate
                 break
-    if principal is None:
-        raise ValueError(
-            "could not derive an authorized caller from a recognized modifier and public address getter"
-        )
-
     # Use a valid, state-changing argument vector for both callers. The attacker
     # is tested first; the authorized control then uses the exact same calldata.
     # If no argument can be varied consistently with the observed state type, fail
@@ -199,6 +194,45 @@ def generate_blind_authorization_test_from_experiment(
     argument_list = ", ".join(arguments)
     state_snapshot = f"{state_type} beforeState = target.{state_getter}();"
     state_after = f"target.{state_getter}()"
+    if principal is not None:
+        principal_setup = (
+            f"address authorized = target.{principal}();\\n"
+            '        require(authorized != address(0), "CYDRA_MEASUREMENT_ASSERTION: authorized principal unavailable");\\n'
+            "        if (unauthorized == authorized) unauthorized = address(0xCAFD);"
+        )
+        control_lines = [
+            "        vm.prank(unauthorized);",
+            "        (bool unauthorizedOk,) = address(target).call(payload);",
+            f"        if (unauthorizedOk && {state_after} != beforeState) {{",
+            f'            require(false, "{security_assertion_marker()}: unauthorized caller mutated modeled administrative state");',
+            "        }",
+            "        require(",
+            f"            !unauthorizedOk && {state_after} == beforeState,",
+            '            "CYDRA_MEASUREMENT_ASSERTION: unauthorized differential control was not established"',
+            "        );",
+            "",
+            "        vm.prank(authorized);",
+            "        (bool authorizedOk,) = address(target).call(payload);",
+            '        require(authorizedOk, "CYDRA_MEASUREMENT_ASSERTION: authorized control failed");',
+            "        require(",
+            f"            {state_after} != beforeState,",
+            '            "CYDRA_MEASUREMENT_ASSERTION: authorized control did not change observed state"',
+            "        );",
+        ]
+    else:
+        # Without a source-derived authorized actor, an observed unauthorized
+        # state mutation can still support the hypothesis. Failure to reproduce
+        # it cannot establish rejection and must remain unmeasurable.
+        principal_setup = ""
+        control_lines = [
+            "        vm.prank(unauthorized);",
+            "        (bool unauthorizedOk,) = address(target).call(payload);",
+            f"        if (unauthorizedOk && {state_after} != beforeState) {{",
+            f'            require(false, "{security_assertion_marker()}: unauthorized caller mutated modeled administrative state");',
+            "        }",
+            '        require(false, "CYDRA_MEASUREMENT_ASSERTION: authorized control unavailable; cannot establish rejected");',
+        ]
+    control_body = "\\n".join(control_lines)
     source = f'''// SPDX-License-Identifier: UNLICENSED
 pragma solidity {pragma};
 // Hypothesis: {hypothesis.hypothesis_id}
@@ -232,34 +266,15 @@ contract CydraBlindAuthorizationTest {{
     }}
 
     function testAuthorizationDifferentialOnModeledState() public {{
-        address authorized = target.{principal}();
-        require(authorized != address(0), "CYDRA_MEASUREMENT_ASSERTION: authorized principal unavailable");
         address unauthorized = address(0xCAFE);
-        if (unauthorized == authorized) unauthorized = address(0xCAFD);
+        {principal_setup}
         {state_snapshot}
         {mutable_value}
         bytes memory payload = abi.encodeWithSignature(
             "{function.name}({parameter_types})",
             {argument_list}
         );
-
-        vm.prank(unauthorized);
-        (bool unauthorizedOk,) = address(target).call(payload);
-        if (unauthorizedOk && {state_after} != beforeState) {{
-            require(false, "{security_assertion_marker()}: unauthorized caller mutated modeled administrative state");
-        }}
-        require(
-            !unauthorizedOk && {state_after} == beforeState,
-            "CYDRA_MEASUREMENT_ASSERTION: unauthorized differential control was not established"
-        );
-
-        vm.prank(authorized);
-        (bool authorizedOk,) = address(target).call(payload);
-        require(authorizedOk, "CYDRA_MEASUREMENT_ASSERTION: authorized control failed");
-        require(
-            {state_after} != beforeState,
-            "CYDRA_MEASUREMENT_ASSERTION: authorized control did not change observed state"
-        );
+        {control_body}
     }}
 }}
 '''
