@@ -25,17 +25,20 @@ def _security_assertion_failed(execution: ExecutionResult) -> bool:
     return _SECURITY_MARKER in output and execution.status == "FAIL"
 
 
+def _measurement_assertion_failed(execution: ExecutionResult) -> bool:
+    output = f"{execution.stdout}\\n{execution.stderr}"
+    return "CYDRA_MEASUREMENT_ASSERTION:" in output and execution.status == "FAIL"
+
+
 def classify_authorization_blind_execution(
     hypothesis: Hypothesis,
     execution: ExecutionResult,
 ) -> AuthorizationBlindOutcome:
-    """Classify one-sided authorization evidence without a patched oracle.
+    """Classify differential evidence as supported, rejected, or unmeasurable.
 
-    The generated experiment asserts the invariant directly: an arbitrary caller
-    must not successfully mutate the modeled administrative state. A passing test
-    therefore means this experiment did not reproduce the suspected violation.
-    A failure is only promotable when Foundry reports the explicit CYDRA security
-    assertion, rather than a compiler/deployment/tool failure.
+    A passing generated harness proves that the authorized caller changed observed
+    state while the unauthorized caller reverted without changing it. Only the
+    explicit unauthorized-mutation assertion supports a positive finding.
     """
     evidence_id = f"E-EXEC-{hypothesis.hypothesis_id}-AUTHORIZATION-BLIND"
     if execution.status == "UNMEASURABLE" or not execution.executed:
