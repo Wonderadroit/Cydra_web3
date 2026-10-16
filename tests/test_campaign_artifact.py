@@ -79,3 +79,100 @@ def test_campaign_evidence_persists_runner_aborted_before_result_construction(tm
     assert payload["failure_reason"] == "fixture abort before payload"
     preserved = output.parent / "generated-tests" / generated.name
     assert preserved.read_text(encoding="utf-8") == "// exact generated test\\n"
+
+
+
+def test_real_campaign_runner_persists_mismatch_json_and_generated_test(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Exercise main()'s real mismatch return and finally-based artifact persistence."""
+    import subprocess
+    import sys
+
+    import scripts.run_authorization_campaign as campaign
+
+    target = tmp_path / "target-repo"
+    (target / "contracts").mkdir(parents=True)
+    source = target / "contracts" / "Foo.sol"
+    source.write_text(
+        "pragma solidity ^0.8.20; contract Foo { function setOwner(address) public {} }\n",
+        encoding="utf-8",
+    )
+    subprocess.run(("git", "init", "--initial-branch=main", str(target)), check=True, capture_output=True)
+    subprocess.run(("git", "-C", str(target), "config", "user.email", "cydra-test@example.invalid"), check=True)
+    subprocess.run(("git", "-C", str(target), "config", "user.name", "CYDRA test"), check=True)
+    subprocess.run(("git", "-C", str(target), "add", "."), check=True)
+    subprocess.run(("git", "-C", str(target), "commit", "-m", "fixture target"), check=True, capture_output=True)
+    target_ref = subprocess.run(
+        ("git", "-C", str(target), "rev-parse", "HEAD"),
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+
+    hypothesis = SimpleNamespace(
+        invariant_id="INV-AUTH-001", hypothesis_id="H1", target_function="setOwner",
+    )
+    experiment = SimpleNamespace(hypothesis_id="H1", experiment_id="E1")
+    function = SimpleNamespace(name="setOwner", visibility="public", modifiers=(), writes=())
+    contract = SimpleNamespace(name="Foo", source=str(source), functions=(function,))
+    result = SimpleNamespace(
+        hypotheses=(hypothesis,), experiments=(experiment,), contracts=(contract,),
+        seeds=(), invariants=(),
+    )
+    monkeypatch.setattr(
+        campaign, "_materialize_target_dependencies",
+        lambda project: {"status": "READY", "package_manager": "fixture", "lockfile": None, "confidence": "test"},
+    )
+    monkeypatch.setattr(
+        campaign, "compile_state_effects",
+        lambda project, source: SimpleNamespace(status="OK", evidence=()),
+    )
+    monkeypatch.setattr(campaign, "investigate_authorization", lambda *args, **kwargs: result)
+
+    def prepare(checkout, target_source, execution_project):
+        destination = execution_project / "src" / "Foo.sol"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(target_source.read_text(encoding="utf-8"), encoding="utf-8")
+
+    monkeypatch.setattr(campaign, "_prepare_isolated_foundry_project", prepare)
+
+    def generate(hyp, exp, import_path, contract_name, output, model):
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text("// generated authorization test fixture\n", encoding="utf-8")
+        return output
+
+    monkeypatch.setattr(campaign, "generate_blind_authorization_test_from_experiment", generate)
+    monkeypatch.setattr(
+        campaign, "run_foundry_test",
+        lambda *args, **kwargs: SimpleNamespace(
+            experiment_id="E1", target="fixture", command=("forge", "test"),
+            exit_code=0, executed=True, tests_run=1, tests_failed=0,
+            status="PASS", stdout="fixture execution", stderr="",
+        ),
+    )
+    monkeypatch.setattr(
+        campaign, "classify_authorization_blind_execution",
+        lambda *args, **kwargs: SimpleNamespace(
+            benchmark_status="not_confirmed",
+            evidence=SimpleNamespace(evidence_id="fixture-evidence"),
+        ),
+    )
+
+    output = tmp_path / "artifacts" / "authorization-campaign.json"
+    monkeypatch.setattr(sys, "argv", [
+        "run_authorization_campaign.py",
+        "--target-repo", str(target),
+        "--target-ref", target_ref,
+        "--target-path", "contracts/Foo.sol",
+        "--target-project", ".",
+        "--expected-status", "confirmed",
+        "--output", str(output),
+    ])
+
+    assert campaign.main() == 2
+
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["classification"] == "not_confirmed"
+    assert payload["exit_reason"] == "expected_outcome_mismatch"
+    preserved_tests = list((output.parent / "generated-tests").glob("*.sol"))
+    assert len(preserved_tests) == 1
+    assert preserved_tests[0].read_text(encoding="utf-8") == "// generated authorization test fixture\n"
