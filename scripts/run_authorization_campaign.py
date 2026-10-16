@@ -39,7 +39,9 @@ def _persist_campaign_evidence(output: Path | None, payload, generated, failure_
     if generated is not None and Path(generated).is_file():
         generated_dir = output.parent / "generated-tests"
         generated_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(generated, generated_dir / Path(generated).name)
+        destination = generated_dir / Path(generated).name
+        if Path(generated).resolve() != destination.resolve():
+            shutil.copy2(generated, destination)
 
 
 def _seed_coverage_allows_measurement(hypotheses, seeds) -> bool:
