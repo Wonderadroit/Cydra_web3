@@ -18,6 +18,16 @@ except ImportError:  # surfaced as an explicit capability status by the caller
 MAX_DIAGNOSTIC_CHARS = 6000
 
 
+def _persist_solc_diagnostics(project: Path, input_json: dict[str, Any], errors: list[Any]) -> None:
+    """Persist source-unit keys and compiler errors together for reproducible diagnosis."""
+    root = Path(os.environ.get("CYDRA_SOLC_DIAGNOSTIC_DIR", project / ".cydra-diagnostics"))
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "solc-input-keys.json").write_text(
+        json.dumps(sorted(input_json.get("sources", {}).keys()), indent=2) + "\n", encoding="utf-8"
+    )
+    (root / "solc-errors.json").write_text(json.dumps(errors, indent=2) + "\n", encoding="utf-8")
+
+
 def _redact(text: str) -> str:
     text = re.sub(r"(?i)(token|secret|password|api[_-]?key)(\s*[=:]\s*)[^\s,;]+", r"\1\2[REDACTED]", text)
     return text[-MAX_DIAGNOSTIC_CHARS:]
@@ -91,6 +101,17 @@ def _closure(project: Path, entry: Path) -> tuple[dict[str, str], list[str]]:
         contents[unit] = source
         for spec in import_re.findall(strip_comments(source)):
             resolved = _resolve_import(project, unit, spec, remappings)
+            # A package source-unit name (e.g. @sample/pkg/A.sol) need not mirror
+            # its on-disk node_modules path. Solc resolves a relative import from
+            # the source-unit name, while the bytes can be read relative to the
+            # physical importing file. Preserve the former and use the latter.
+            if resolved is None and spec.startswith("."):
+                relative_unit = os.path.normpath(
+                    str(PurePosixPath(unit).parent.joinpath(spec))
+                ).replace("\\\\", "/")
+                relative_path = (path.parent / spec).resolve()
+                if relative_path.is_file():
+                    resolved = (relative_unit, relative_path)
             if resolved is None:
                 unresolved.add(f"{unit}: {spec}")
             elif resolved[0] not in contents:
@@ -143,13 +164,7 @@ def compile_standard_json(project: Path, entry: Path) -> dict[str, Any]:
                 "target_source_present": False, "stderr_excerpt": _redact(str(exc)),
                 "process_exit_status": None, "unresolved_imports": [],
                 "compiler_command": ["solcx.compile_standard"]}
-    if unresolved:
-        return {"status": "source_dependency_closure_incomplete", "solc_version_used": None,
-                "errors_count": 0, "fatal_errors": [], "sources_parsed": [],
-                "target_source_present": entry.resolve().relative_to(project.resolve()).as_posix() in contents,
-                "stderr_excerpt": "", "process_exit_status": None,
-                "unresolved_imports": unresolved, "source_dependency_count": len(contents),
-                "compiler_command": ["solcx.compile_standard"]}
+    closure_status = "source_dependency_closure_incomplete" if unresolved else "complete"
     requested = None
     # A literal version in config is only a hint, not authority over source pragmas.
     config = project / "hardhat.config.js"
@@ -186,8 +201,15 @@ def compile_standard_json(project: Path, entry: Path) -> dict[str, Any]:
     input_json = {
         "language": "Solidity",
         "sources": {unit: {"content": source} for unit, source in contents.items()},
-        "settings": {"outputSelection": {"*": {"": ["ast"], "*": []}}},
+        "settings": {
+            **({"remappings": [f"{prefix}={target}" for prefix, target in _remappings(project.resolve())]}
+               if _remappings(project.resolve()) else {}),
+            "outputSelection": {"*": {"": ["ast"], "*": []}},
+        },
     }
+    # Persist the exact source-unit keys before invoking solc; errors are written
+    # beside them after parsing the compiler response, including failure responses.
+    _persist_solc_diagnostics(project.resolve(), input_json, [])
     try:
         output = solcx.compile_standard(input_json, solc_version=version, allow_paths=str(project.resolve()))
     except Exception as exc:
@@ -202,12 +224,16 @@ def compile_standard_json(project: Path, entry: Path) -> dict[str, Any]:
             output = None
         if not isinstance(output, dict):
             message = _redact(str(exc))
-            return {"status": "compile_failed", "solc_version_used": version, "errors_count": 1,
-                    "fatal_errors": [message], "sources_parsed": [], "target_source_present": False,
-                    "stderr_excerpt": message, "process_exit_status": None, "unresolved_imports": [],
-                    "source_dependency_count": len(contents), "compiler_command": ["solcx.compile_standard", "--version", version]}
+            _persist_solc_diagnostics(project.resolve(), input_json, [{"severity": "error", "message": message}])
+            return {"status": "compile_failed", "closure_status": closure_status,
+                    "solc_version_used": version, "errors_count": 1,
+                    "fatal_errors": [{"severity": "error", "message": message}], "sources_parsed": [], "target_source_present": False,
+                    "stderr_excerpt": message, "process_exit_status": None, "unresolved_imports": unresolved,
+                    "source_dependency_count": len(contents), "compiler_command": ["solcx.compile_standard", "--version", version],
+                    "input": input_json}
     errors = output.get("errors", []) if isinstance(output, dict) else []
     fatal = [item for item in errors if isinstance(item, dict) and item.get("severity") == "error"]
+    _persist_solc_diagnostics(project.resolve(), input_json, errors if isinstance(errors, list) else [])
     parsed = output.get("sources", {}) if isinstance(output, dict) else {}
     ast_sources = sorted(unit for unit, item in parsed.items()
                          if isinstance(item, dict) and isinstance(item.get("ast"), dict))
@@ -216,9 +242,9 @@ def compile_standard_json(project: Path, entry: Path) -> dict[str, Any]:
     status = "compile_failed" if fatal else ("success" if target_present else "no_ast_for_source")
     diagnostic_text = "\n".join(str(item.get("formattedMessage", item.get("message", "")))
                                  for item in errors if isinstance(item, dict))
-    return {"status": status, "solc_version_used": version, "errors_count": len(errors),
+    return {"status": status, "closure_status": closure_status, "solc_version_used": version, "errors_count": len(errors),
             "fatal_errors": fatal, "sources_parsed": ast_sources, "target_source_present": target_present,
             "stderr_excerpt": _redact(diagnostic_text), "process_exit_status": 0 if not fatal else 1,
-            "unresolved_imports": [], "source_dependency_count": len(contents),
+            "unresolved_imports": unresolved, "source_dependency_count": len(contents),
             "compiler_command": ["solcx.compile_standard", "--version", version],
             "output": output, "input": input_json}

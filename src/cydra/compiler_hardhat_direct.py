@@ -28,6 +28,7 @@ def compile_hardhat_direct(project: Path, source: Path) -> Any:
             0, len(raw.get("sources_parsed", [])), bool(raw.get("target_source_present")),
             int(raw.get("source_dependency_count", 0)),
             tuple(raw.get("unresolved_imports", ())),
+            closure_status=str(raw.get("closure_status", "complete")),
         )
     # Reuse the existing AST extractors by adapting Standard JSON output to the
     # minimal build-info envelope they already consume.
@@ -57,4 +58,5 @@ def compile_hardhat_direct(project: Path, source: Path) -> Any:
         (raw["solc_version_used"],) if raw.get("solc_version_used") else (),
         0, len(raw.get("sources_parsed", [])), bool(raw.get("target_source_present")),
         int(raw.get("source_dependency_count", 0)), tuple(raw.get("unresolved_imports", ())),
+        closure_status=str(raw.get("closure_status", "complete")),
     )
