@@ -27,7 +27,7 @@ LAYOUTS = [
             "lib/forge-std/src/Test.sol":
                 "pragma solidity ^0.8.20; library Test { function value() internal pure returns (uint256) { return 1; } }",
         },
-        ["src/lib/forge-std/src/Test.sol"],
+        ["lib/forge-std/src/Test.sol"],
         id="local-lib",
     ),
     pytest.param(
@@ -40,7 +40,7 @@ LAYOUTS = [
             "lib/vendor/nested/src/Base.sol":
                 "pragma solidity ^0.8.20; contract Base { function value() public pure returns (uint256) { return 2; } }",
         },
-        ["src/lib/vendor/nested/src/Child.sol", "src/lib/vendor/nested/src/Base.sol"],
+        ["lib/vendor/nested/src/Child.sol", "lib/vendor/nested/src/Base.sol"],
         id="nested-lib",
     ),
     pytest.param(
@@ -87,7 +87,7 @@ LAYOUTS = [
                 "pragma solidity ^0.8.20; contract AccessControl {}",
         },
         [
-            "src/lib/forge-std/src/Test.sol",
+            "lib/forge-std/src/Test.sol",
             "node_modules/@openzeppelin/contracts/access/AccessControl.sol",
         ],
         id="mixed-npm-and-lib",
