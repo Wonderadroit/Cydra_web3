@@ -17,6 +17,7 @@ class AuthorizationBlindOutcome:
     evidence: Evidence
     internal_status: str
     benchmark_status: str
+    measurement_verdict: str
 
 
 def _security_assertion_failed(execution: ExecutionResult) -> bool:
@@ -37,28 +38,38 @@ def classify_authorization_blind_execution(
     assertion, rather than a compiler/deployment/tool failure.
     """
     evidence_id = f"E-EXEC-{hypothesis.hypothesis_id}-AUTHORIZATION-BLIND"
-    output = f"{execution.stdout}\n{execution.stderr}"
     if execution.status == "UNMEASURABLE" or not execution.executed:
         semantics = "unmeasurable"
+        measurement_verdict = "unmeasurable"
         internal_status = benchmark_status = "proposed"
     elif execution.status == "PASS":
-        semantics = "security_invariant_preserved"
+        # A passing differential harness has established both controls:
+        # authorized caller changed observed state; unauthorized caller reverted
+        # without changing it.
+        semantics = "authorized_control_succeeded_unauthorized_control_rejected"
+        measurement_verdict = "rejected"
         internal_status, benchmark_status = "rejected", "not_confirmed"
     elif _security_assertion_failed(execution):
         semantics = "unauthorized_state_mutation"
+        measurement_verdict = "supported"
         internal_status = benchmark_status = "confirmed"
+    elif _measurement_assertion_failed(execution):
+        semantics = "differential_control_not_established"
+        measurement_verdict = "unmeasurable"
+        internal_status = benchmark_status = "proposed"
     else:
         semantics = "non_security_execution_failure"
+        measurement_verdict = "unmeasurable"
         internal_status = benchmark_status = "proposed"
 
     evidence = Evidence(
         evidence_id,
         "execution",
         (
-            f"Blind authorization experiment: status={execution.status}, "
-            f"semantics={semantics}, executed={execution.executed}, "
-            f"tests_run={execution.tests_run}, tests_failed={execution.tests_failed}, "
-            f"exit={execution.exit_code}."
+            f"Authorization differential: verdict={measurement_verdict}, "
+            f"semantics={semantics}, status={execution.status}, "
+            f"executed={execution.executed}, tests_run={execution.tests_run}, "
+            f"tests_failed={execution.tests_failed}, exit={execution.exit_code}."
         ),
         " ".join(execution.command),
         execution.target + ".t.sol",
@@ -75,7 +86,7 @@ def classify_authorization_blind_execution(
         hypothesis.related_functions,
     )
     return AuthorizationBlindOutcome(
-        updated, execution, evidence, internal_status, benchmark_status
+        updated, execution, evidence, internal_status, benchmark_status, measurement_verdict
     )
 
 
