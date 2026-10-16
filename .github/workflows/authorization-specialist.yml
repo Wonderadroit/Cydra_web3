@@ -125,6 +125,7 @@ jobs:
           TARGET_PATH: ${{ inputs.target_path }}
           TARGET_PROJECT: ${{ inputs.target_project }}
           REQUIRE_READY: ${{ inputs.require_ready }}
+          CYDRA_SOLC_DIAGNOSTIC_DIR: ${{ runner.temp }}
         run: |
           set -o pipefail
           args=(
@@ -148,5 +149,7 @@ jobs:
             ${{ runner.temp }}/authorization-campaign.json
             ${{ runner.temp }}/authorization-campaign.log
             ${{ runner.temp }}/generated-tests/
+            ${{ runner.temp }}/solc-input-keys.json
+            ${{ runner.temp }}/solc-errors.json
           if-no-files-found: warn
           retention-days: 14

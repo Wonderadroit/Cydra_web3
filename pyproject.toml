@@ -7,7 +7,7 @@ name = "cydra-web3"
 version = "0.1.0"
 description = "Evidence-first Solidity authorization vulnerability research specialist"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = ["py-solc-x>=2.0.3,<3", "semantic-version>=2.10,<3"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

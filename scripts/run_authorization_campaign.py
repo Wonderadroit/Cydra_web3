@@ -511,6 +511,7 @@ def _no_hypothesis_payload(target, compiler, result, related_intent_parity_hypot
             "source_ast_found": compiler.source_ast_found,
             "source_dependency_count": compiler.source_dependency_count,
             "unresolved_imports": list(compiler.unresolved_imports),
+            "source_closure_status": getattr(compiler, "closure_status", "complete"),
             "semantic_relationship_count": len(compiler.evidence),
             "parameter_constraint_count": len(compiler.constraints),
         },
