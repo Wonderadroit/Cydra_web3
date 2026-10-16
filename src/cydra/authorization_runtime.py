@@ -26,7 +26,7 @@ def _security_assertion_failed(execution: ExecutionResult) -> bool:
 
 
 def _measurement_assertion_failed(execution: ExecutionResult) -> bool:
-    output = f"{execution.stdout}\\n{execution.stderr}"
+    output = f"{execution.stdout}\n{execution.stderr}"
     return "CYDRA_MEASUREMENT_ASSERTION:" in output and execution.status == "FAIL"
 
 
