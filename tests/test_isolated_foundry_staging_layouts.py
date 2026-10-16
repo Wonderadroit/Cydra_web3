@@ -66,6 +66,17 @@ LAYOUTS = [
         id="npm-package",
     ),
     pytest.param(
+        "npm-no-remappings",
+        'import "@openzeppelin/contracts/access/Ownable.sol";',
+        "",
+        {
+            "node_modules/@openzeppelin/contracts/access/Ownable.sol":
+                "pragma solidity ^0.8.20; abstract contract Ownable {}",
+        },
+        ["node_modules/@openzeppelin/contracts/access/Ownable.sol"],
+        id="npm-no-remappings",
+    ),
+    pytest.param(
         "mixed-npm-and-lib",
         'import "forge-std/Test.sol"; import "@openzeppelin/contracts/access/AccessControl.sol";',
         "forge-std/=lib/forge-std/src/\n@openzeppelin/=node_modules/@openzeppelin/\n",
@@ -106,14 +117,15 @@ def test_isolated_foundry_staging_supports_five_dependency_layouts(
         + imports
         + " contract Entry { function value() external pure returns (uint256) { return 1; } }",
     )
-    _write(target / "remappings.txt", remappings)
+    if remappings:
+        _write(target / "remappings.txt", remappings)
     for relative, content in dependencies.items():
         # npm files must be absent until the simulated lockfile install runs.
-        if relative.startswith("node_modules/") and layout in {"npm-package", "mixed-npm-and-lib"}:
+        if relative.startswith("node_modules/") and layout in {"npm-package", "mixed-npm-and-lib", "npm-no-remappings"}:
             continue
         _write(target / relative, content)
 
-    if layout in {"npm-package", "mixed-npm-and-lib"}:
+    if layout in {"npm-package", "mixed-npm-and-lib", "npm-no-remappings"}:
         # The important regression: the pinned checkout has a manifest and
         # lockfile but no node_modules directory. Simulate the package manager
         # resolving package contents; do not perform network I/O in unit tests.
@@ -162,6 +174,10 @@ def test_isolated_foundry_staging_supports_five_dependency_layouts(
     if "node_modules/@openzeppelin/" in remappings:
         assert "@openzeppelin/=node_modules/@openzeppelin/" in foundry_config
         assert "@openzeppelin/=node_modules/node_modules/" not in foundry_config
+    if layout == "npm-no-remappings":
+        assert "@openzeppelin/contracts/=node_modules/@openzeppelin/contracts/" in foundry_config
+        assert (isolated / "remappings.txt").is_file()
+        assert not (target / "remappings.txt").exists()
 
     # CI installs Foundry for the regression job. Local Python-only runs still
     # validate paths and dependency preparation without requiring Foundry.
