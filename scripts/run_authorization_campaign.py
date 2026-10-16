@@ -269,7 +269,8 @@ def _prepare_isolated_foundry_project(target_root: Path, source: Path, destinati
             return src_root / resolved.relative_to(source_root)
         except ValueError:
             relative = resolved.relative_to(target_root.resolve())
-            if relative.parts and relative.parts[0] == "node_modules":
+            if relative.parts and relative.parts[0] in {"node_modules", "lib"}:
+                # Preserve Foundry's conventional root-level dependency trees.
                 return destination / relative
             return src_root / relative
 
@@ -345,7 +346,7 @@ def _prepare_isolated_foundry_project(target_root: Path, source: Path, destinati
     for prefix, destination_path in remappings:
         # npm remapping destinations already include their root prefix. Other
         # checkout dependencies are staged under src/.
-        if destination_path.startswith("node_modules/"):
+        if destination_path.startswith(("node_modules/", "lib/")):
             remapping_lines.append(f"{prefix}={destination_path}")
         else:
             remapping_lines.append(f"{prefix}=src/{destination_path}")
