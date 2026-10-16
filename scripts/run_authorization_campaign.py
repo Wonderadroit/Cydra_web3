@@ -839,7 +839,7 @@ def main() -> int:
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
             if payload is not None:
-                args.output.write_text(json.dumps(_json(payload), indent=2) + "\\n", encoding="utf-8")
+                args.output.write_text(json.dumps(_json(payload), indent=2) + "\n", encoding="utf-8")
             if generated is not None and Path(generated).is_file():
                 generated_dir = args.output.parent / "generated-tests"
                 generated_dir.mkdir(parents=True, exist_ok=True)
