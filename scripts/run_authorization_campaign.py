@@ -24,6 +24,24 @@ from cydra.reasoning import (
 
 _IMPORT_RE = re.compile(r'''\bimport\s+(?:[^\"']+\s+from\s+)?[\"']([^\"']+)[\"']\s*;''')
 
+def _persist_campaign_evidence(output: Path | None, payload, generated, failure_reason=None) -> None:
+    """Persist campaign evidence independently of the campaign's exit status."""
+    if output is None:
+        return
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if payload is None:
+        payload = {
+            "classification": "RUNNER_ABORTED",
+            "finding_gate": "NOT_READY",
+            "failure_reason": failure_reason or "campaign exited before producing a result payload",
+        }
+    output.write_text(json.dumps(_json(payload), indent=2) + "\n", encoding="utf-8")
+    if generated is not None and Path(generated).is_file():
+        generated_dir = output.parent / "generated-tests"
+        generated_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(generated, generated_dir / Path(generated).name)
+
+
 def _seed_coverage_allows_measurement(hypotheses, seeds) -> bool:
     """Seed coverage is a successful measurement, never finding readiness."""
     return not hypotheses and bool(seeds)
@@ -837,20 +855,13 @@ def main() -> int:
             return 0
     finally:
         # Persist evidence on every exit path, including returns and SystemExit.
-        if args.output:
-            args.output.parent.mkdir(parents=True, exist_ok=True)
-            if payload is None:
-                active_error = sys.exc_info()[1]
-                payload = {
-                    "classification": "RUNNER_ABORTED",
-                    "finding_gate": "NOT_READY",
-                    "failure_reason": str(active_error) if active_error else "campaign exited before producing a result payload",
-                }
-            args.output.write_text(json.dumps(_json(payload), indent=2) + "\n", encoding="utf-8")
-            if generated is not None and Path(generated).is_file():
-                generated_dir = args.output.parent / "generated-tests"
-                generated_dir.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(generated, generated_dir / Path(generated).name)
+        active_error = sys.exc_info()[1]
+        _persist_campaign_evidence(
+            args.output,
+            payload,
+            generated,
+            str(active_error) if active_error else None,
+        )
 
 
 
