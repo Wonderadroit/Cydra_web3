@@ -113,11 +113,6 @@ def test_real_campaign_runner_persists_mismatch_json_and_generated_test(
     )
     experiment = SimpleNamespace(hypothesis_id="H1", experiment_id="E1")
     function = SimpleNamespace(name="setOwner", visibility="public", modifiers=(), writes=())
-    contract = SimpleNamespace(name="Foo", source=str(source), functions=(function,))
-    result = SimpleNamespace(
-        hypotheses=(hypothesis,), experiments=(experiment,), contracts=(contract,),
-        seeds=(), invariants=(),
-    )
     monkeypatch.setattr(
         campaign, "_materialize_target_dependencies",
         lambda project: {"status": "READY", "package_manager": "fixture", "lockfile": None, "confidence": "test"},
@@ -126,7 +121,14 @@ def test_real_campaign_runner_persists_mismatch_json_and_generated_test(
         campaign, "compile_state_effects",
         lambda project, source: SimpleNamespace(status="OK", evidence=()),
     )
-    monkeypatch.setattr(campaign, "investigate_authorization", lambda *args, **kwargs: result)
+    def investigate(target_source, **kwargs):
+        contract = SimpleNamespace(name="Foo", source=str(target_source), functions=(function,))
+        return SimpleNamespace(
+            hypotheses=(hypothesis,), experiments=(experiment,), contracts=(contract,),
+            seeds=(), invariants=(),
+        )
+
+    monkeypatch.setattr(campaign, "investigate_authorization", investigate)
 
     def prepare(checkout, target_source, execution_project):
         destination = execution_project / "src" / "Foo.sol"
