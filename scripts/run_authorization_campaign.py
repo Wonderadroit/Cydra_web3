@@ -618,6 +618,7 @@ def main() -> int:
     root = Path(__file__).resolve().parents[1]
     payload = None
     generated = None
+    generated_artifact = None
     try:
         with tempfile.TemporaryDirectory(prefix="cydra-blind-auth-") as temp:
             checkout = Path(temp) / "target"
@@ -764,6 +765,11 @@ def main() -> int:
                         output,
                         contract,
                     )
+                    if args.output and generated is not None and Path(generated).is_file():
+                        generated_dir = args.output.parent / "generated-tests"
+                        generated_dir.mkdir(parents=True, exist_ok=True)
+                        generated_artifact = generated_dir / Path(generated).name
+                        shutil.copy2(generated, generated_artifact)
                 except ValueError as exc:
                     # A missing constructor type is a modeling/execution-precondition
                     # gap, not evidence about the target. Preserve it explicitly as
@@ -859,7 +865,7 @@ def main() -> int:
         _persist_campaign_evidence(
             args.output,
             payload,
-            generated,
+            generated_artifact or generated,
             str(active_error) if active_error else None,
         )
 
