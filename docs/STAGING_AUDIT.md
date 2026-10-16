@@ -32,7 +32,9 @@ Target package-manager lifecycle scripts must not execute in CI. Dependency inst
 4. **npm package** — package declared in manifest, lockfile present, no initial `node_modules`; package-manager invocation is asserted to include `--ignore-scripts`.
 5. **Mixed npm + `lib/`** — both dependency classes resolve in the same isolated project.\n6. **npm without remappings** — scoped package import resolves through `node_modules/<spec>` and receives an automatically generated remapping.
 
-The integration test runs `forge build` for each fixture when Foundry is installed (CI installs Foundry). Package-manager invocation tests cover npm, pnpm, Yarn classic, Bun, and the no-lockfile npm fallback without network access.
+The eight historical fixtures also preserve the Grunt, Symbiotic, Berachain, and BaseEmissions layouts as an acceptance suite for the resolver redesign.
+
+The parameterized test covers six dependency layouts; the historical acceptance test imports all seven layouts from PR #72 plus `npm-no-remappings` (eight total) and requires each isolated project to compile under Foundry. Package-manager invocation tests cover npm, pnpm, Yarn classic, Bun, and the no-lockfile npm fallback without network access.
 
 ## Remaining bounded limitations
 
