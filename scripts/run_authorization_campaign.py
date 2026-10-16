@@ -799,6 +799,7 @@ def main() -> int:
                         "dependency_materialization": dependency_materialization,
                         "blind_execution": _json(execution),
                         "classification": outcome.benchmark_status,
+                        "measurement_verdict": outcome.measurement_verdict,
                         "finding_gate": "NOT_READY",
                     }
                     if args.output:
@@ -823,7 +824,7 @@ def main() -> int:
                     f"{hypothesis.hypothesis_id}: status={execution.status} "
                     f"classification={outcome.benchmark_status} evidence={outcome.evidence.evidence_id}"
                 )
-                payload={"target":f"{args.target_repo}@{args.target_ref}:{args.target_path}","hypothesis_seeds":_json(getattr(result, "seeds", ())),"hypothesis":_json(hypothesis),"experiment":_json(experiment),"dependency_materialization":dependency_materialization,"blind_execution":_json(execution),"classification":outcome.benchmark_status,"finding_gate":"CONFIRMED_ONLY"}
+                payload={"target":f"{args.target_repo}@{args.target_ref}:{args.target_path}","hypothesis_seeds":_json(getattr(result, "seeds", ())),"hypothesis":_json(hypothesis),"experiment":_json(experiment),"dependency_materialization":dependency_materialization,"blind_execution":_json(execution),"classification":outcome.benchmark_status,"measurement_verdict":outcome.measurement_verdict,"finding_gate":"CONFIRMED_ONLY"}
                 if generated is not None:
                     payload["generated_test_path"] = str(generated)
                 if outcome.benchmark_status != args.expected_status:
