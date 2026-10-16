@@ -197,14 +197,14 @@ def test_seed_generator_keeps_protected_state_writer_as_question(tmp_path: Path)
 def test_guarded_setter_uses_authorized_vs_unauthorized_state_differential(tmp_path: Path):
     source = tmp_path / "OwnerTarget.sol"
     source.write_text(
-        "pragma solidity ^0.8.20;\\n"
-        "contract OwnerTarget {\\n"
-        "  address public owner;\\n"
-        "  address public manager;\\n"
-        "  constructor() { owner = msg.sender; }\\n"
-        "  modifier onlyOwner() { require(msg.sender == owner, \\"owner\"); _; }\\n"
-        "  function setManager(address next) external onlyOwner { manager = next; }\\n"
-        "}\\n",
+        "pragma solidity ^0.8.20;\n"
+        "contract OwnerTarget {\n"
+        "  address public owner;\n"
+        "  address public manager;\n"
+        "  constructor() { owner = msg.sender; }\n"
+        "  modifier onlyOwner() { require(msg.sender == owner, 'owner'); _; }\n"
+        "  function setManager(address next) external onlyOwner { manager = next; }\n"
+        "}\n",
         encoding="utf-8",
     )
     function = FunctionModel(
