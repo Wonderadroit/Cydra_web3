@@ -255,7 +255,7 @@ contract CydraBlindAuthorizationTest {{
     function setUp() public {{
         bytes memory initCode = abi.encodePacked(
             _targetCreationCode(),
-            {constructor_suffix}
+            {constructor_encoding}
         );
         address deployed;
         assembly {{
