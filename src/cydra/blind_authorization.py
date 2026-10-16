@@ -196,8 +196,8 @@ def generate_blind_authorization_test_from_experiment(
     state_after = f"target.{state_getter}()"
     if principal is not None:
         principal_setup = (
-            f"address authorized = target.{principal}();\\n"
-            '        require(authorized != address(0), "CYDRA_MEASUREMENT_ASSERTION: authorized principal unavailable");\\n'
+            f"address authorized = target.{principal}();\n"
+            '        require(authorized != address(0), "CYDRA_MEASUREMENT_ASSERTION: authorized principal unavailable");\n'
             "        if (unauthorized == authorized) unauthorized = address(0xCAFD);"
         )
         control_lines = [
@@ -232,7 +232,7 @@ def generate_blind_authorization_test_from_experiment(
             "        }",
             '        require(false, "CYDRA_MEASUREMENT_ASSERTION: authorized control unavailable; cannot establish rejected");',
         ]
-    control_body = "\\n".join(control_lines)
+    control_body = "\n".join(control_lines)
     source = f'''// SPDX-License-Identifier: UNLICENSED
 pragma solidity {pragma};
 // Hypothesis: {hypothesis.hypothesis_id}
