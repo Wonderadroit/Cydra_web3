@@ -124,5 +124,6 @@ jobs:
             ${{ runner.temp }}/target-intake.txt
             ${{ runner.temp }}/authorization-campaign.json
             ${{ runner.temp }}/authorization-campaign.log
+            ${{ runner.temp }}/generated-tests/
           if-no-files-found: warn
           retention-days: 14
