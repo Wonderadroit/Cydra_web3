@@ -155,6 +155,7 @@ def test_real_campaign_runner_persists_mismatch_json_and_generated_test(
         campaign, "classify_authorization_blind_execution",
         lambda *args, **kwargs: SimpleNamespace(
             benchmark_status="not_confirmed",
+            measurement_verdict="rejected",
             evidence=SimpleNamespace(evidence_id="fixture-evidence"),
         ),
     )
