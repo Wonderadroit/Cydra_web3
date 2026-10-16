@@ -18,19 +18,19 @@ Target package-manager lifecycle scripts must not execute in CI. Dependency inst
 | Fallback `current.relative_to(target_root)` | Dependency files must belong to the pinned checkout; paths outside it must not be silently copied. | Keep strict `relative_to` failure; npm paths stage at isolated root, other checkout dependencies under isolated `src/`. |
 | Relative import resolution `current.parent / imported` | Relative imports are resolved against the original source file, not the relocated staged path. | Covered by relative-import and nested-library fixtures. |
 | `contracts/` imports resolved from `target_root` | Legacy project-root import prefix is repository-relative. | Keep; closure traversal copies only existing files and leaves unresolved imports for compiler evidence. |
-| Remapping resolution `target_root / destination_path / suffix` | Remapping destinations are relative to the project root; longest prefix must win. | Keep longest-prefix ordering; staging maps npm destinations directly and non-npm dependency trees under `src/`. |
-| Generated `foundry.toml` remappings | npm destinations must not receive a second `node_modules/`; other target-root dependencies are staged under `src/`. | Covered by npm and mixed-layout fixtures; assert duplicate prefix absent. |
+| Import resolution | Use the ordered rule: importer-relative → explicit remapping (longest prefix) → `node_modules/<spec>` → `<project_root>/<spec>` → unresolved import key. | Each successful non-relative fallback creates a remapping to the staged location; ambiguous generated prefixes fail closed. |
+| Generated `foundry.toml` remappings | npm destinations must not receive a second `node_modules/`; other target-root dependencies are staged under `src/`. | Covered by npm, mixed-layout, and no-remappings npm fixtures; assert duplicate prefix absent and fallback remapping is generated. |
 | Generated `test/generated` and `test_path_for(...)` | Generated test path is isolated-project-relative and must not overwrite target source. | Keep; generated tests remain under isolated `test/generated`. |
 | `source_relative = Path(source).relative_to(source_root)` | Causal-control patch path must match the staged source path. | Keep and cover source-root-relative staging layouts; failure remains an explicit unmeasurable outcome. |
 | Legacy `--target-npm-dependency` and OpenZeppelin-only copy/remapping | Per-package override bypassed manifest/lockfile selection and added target-specific behavior. | Removed; all npm dependency staging is driven by the target manifest and lockfile. |
 
-## Five integration layouts
+## Six integration layouts
 
 1. **Local `lib/`** — remapped local submodule staged under `src/lib/`.
 2. **Nested `lib/`** — nested dependency remapping and internal relative import.
 3. **Relative imports** — source and sibling import preserve source-root-relative structure.
 4. **npm package** — package declared in manifest, lockfile present, no initial `node_modules`; package-manager invocation is asserted to include `--ignore-scripts`.
-5. **Mixed npm + `lib/`** — both dependency classes resolve in the same isolated project.
+5. **Mixed npm + `lib/`** — both dependency classes resolve in the same isolated project.\n6. **npm without remappings** — scoped package import resolves through `node_modules/<spec>` and receives an automatically generated remapping.
 
 The integration test runs `forge build` for each fixture when Foundry is installed (CI installs Foundry). Package-manager invocation tests cover npm, pnpm, Yarn classic, Bun, and the no-lockfile npm fallback without network access.
 
