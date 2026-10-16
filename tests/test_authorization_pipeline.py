@@ -1,9 +1,12 @@
 from pathlib import Path
+import shutil
+
+import pytest
 
 from cydra.authorization_pipeline import investigate_authorization
 from cydra.authorization_runtime import classify_authorization_blind_execution
 from cydra.blind_authorization import generate_blind_authorization_test_from_experiment
-from cydra.foundry import ExecutionResult
+from cydra.foundry import ExecutionResult, run_foundry_test
 from cydra.models import ContractModel, Experiment, FunctionModel, Hypothesis, ParameterModel
 from cydra.reasoning import generate_access_control_hypotheses
 
@@ -195,16 +198,25 @@ def test_seed_generator_keeps_protected_state_writer_as_question(tmp_path: Path)
 
 
 def test_guarded_setter_uses_authorized_vs_unauthorized_state_differential(tmp_path: Path):
-    source = tmp_path / "OwnerTarget.sol"
+    if shutil.which("forge") is None:
+        pytest.skip("Foundry toolchain is not installed")
+    project = tmp_path / "foundry-project"
+    source = project / "src" / "OwnerTarget.sol"
+    source.parent.mkdir(parents=True)
+    (project / "test" / "generated").mkdir(parents=True)
+    (project / "foundry.toml").write_text(
+        "[profile.default]\\nsrc = 'src'\\ntest = 'test'\\n",
+        encoding="utf-8",
+    )
     source.write_text(
-        "pragma solidity ^0.8.20;\n"
-        "contract OwnerTarget {\n"
-        "  address public owner;\n"
-        "  address public manager;\n"
-        "  constructor() { owner = msg.sender; }\n"
-        "  modifier onlyOwner() { require(msg.sender == owner, 'owner'); _; }\n"
-        "  function setManager(address next) external onlyOwner { manager = next; }\n"
-        "}\n",
+        "pragma solidity ^0.8.20;\\n"
+        "contract OwnerTarget {\\n"
+        "  address public owner;\\n"
+        "  address public manager;\\n"
+        "  constructor() { owner = msg.sender; }\\n"
+        "  modifier onlyOwner() { require(msg.sender == owner, 'owner'); _; }\\n"
+        "  function setManager(address next) external onlyOwner { manager = next; }\\n"
+        "}\\n",
         encoding="utf-8",
     )
     function = FunctionModel(
@@ -234,8 +246,8 @@ def test_guarded_setter_uses_authorized_vs_unauthorized_state_differential(tmp_p
         target_function="setManager",
     )
     generated = generate_blind_authorization_test_from_experiment(
-        hypothesis, experiment, "./OwnerTarget.sol", "OwnerTarget",
-        tmp_path / "generated" / "OwnerTarget.t.sol", model,
+        hypothesis, experiment, "../../src/OwnerTarget.sol", "OwnerTarget",
+        project / "test" / "generated" / "OwnerTarget.t.sol", model,
     )
     harness = generated.read_text(encoding="utf-8")
 
@@ -250,12 +262,11 @@ def test_guarded_setter_uses_authorized_vs_unauthorized_state_differential(tmp_p
     assert "authorized control did not change observed state" in harness
     assert "unauthorized caller successfully invoked protected administrative operation" not in harness
 
-    passing = ExecutionResult(
-        experiment_id=experiment.experiment_id, target="guarded-setter-fixture",
-        command=("forge", "test"), exit_code=0, executed=True, tests_run=1,
-        tests_failed=0, status="PASS", stdout="1 passed", stderr="",
-    )
-    rejected = classify_authorization_blind_execution(hypothesis, passing)
+    execution = run_foundry_test(project, generated, experiment.experiment_id, "guarded-setter-fixture")
+    assert execution.executed is True
+    assert execution.tests_run == 1
+    assert execution.status == "PASS"
+    rejected = classify_authorization_blind_execution(hypothesis, execution)
     assert rejected.measurement_verdict == "rejected"
     assert rejected.benchmark_status == "not_confirmed"
 
