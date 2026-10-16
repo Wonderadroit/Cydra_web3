@@ -17,6 +17,7 @@ class AuthorizationBlindOutcome:
     evidence: Evidence
     internal_status: str
     benchmark_status: str
+    measurement_verdict: str
 
 
 def _security_assertion_failed(execution: ExecutionResult) -> bool:
@@ -24,41 +25,54 @@ def _security_assertion_failed(execution: ExecutionResult) -> bool:
     return _SECURITY_MARKER in output and execution.status == "FAIL"
 
 
+def _measurement_assertion_failed(execution: ExecutionResult) -> bool:
+    output = f"{execution.stdout}\n{execution.stderr}"
+    return "CYDRA_MEASUREMENT_ASSERTION:" in output and execution.status == "FAIL"
+
+
 def classify_authorization_blind_execution(
     hypothesis: Hypothesis,
     execution: ExecutionResult,
 ) -> AuthorizationBlindOutcome:
-    """Classify one-sided authorization evidence without a patched oracle.
+    """Classify differential evidence as supported, rejected, or unmeasurable.
 
-    The generated experiment asserts the invariant directly: an arbitrary caller
-    must not successfully mutate the modeled administrative state. A passing test
-    therefore means this experiment did not reproduce the suspected violation.
-    A failure is only promotable when Foundry reports the explicit CYDRA security
-    assertion, rather than a compiler/deployment/tool failure.
+    A passing generated harness proves that the authorized caller changed observed
+    state while the unauthorized caller reverted without changing it. Only the
+    explicit unauthorized-mutation assertion supports a positive finding.
     """
     evidence_id = f"E-EXEC-{hypothesis.hypothesis_id}-AUTHORIZATION-BLIND"
-    output = f"{execution.stdout}\n{execution.stderr}"
     if execution.status == "UNMEASURABLE" or not execution.executed:
         semantics = "unmeasurable"
+        measurement_verdict = "unmeasurable"
         internal_status = benchmark_status = "proposed"
     elif execution.status == "PASS":
-        semantics = "security_invariant_preserved"
+        # A passing differential harness has established both controls:
+        # authorized caller changed observed state; unauthorized caller reverted
+        # without changing it.
+        semantics = "authorized_control_succeeded_unauthorized_control_rejected"
+        measurement_verdict = "rejected"
         internal_status, benchmark_status = "rejected", "not_confirmed"
     elif _security_assertion_failed(execution):
         semantics = "unauthorized_state_mutation"
+        measurement_verdict = "supported"
         internal_status = benchmark_status = "confirmed"
+    elif _measurement_assertion_failed(execution):
+        semantics = "differential_control_not_established"
+        measurement_verdict = "unmeasurable"
+        internal_status = benchmark_status = "proposed"
     else:
         semantics = "non_security_execution_failure"
+        measurement_verdict = "unmeasurable"
         internal_status = benchmark_status = "proposed"
 
     evidence = Evidence(
         evidence_id,
         "execution",
         (
-            f"Blind authorization experiment: status={execution.status}, "
-            f"semantics={semantics}, executed={execution.executed}, "
-            f"tests_run={execution.tests_run}, tests_failed={execution.tests_failed}, "
-            f"exit={execution.exit_code}."
+            f"Authorization differential: verdict={measurement_verdict}, "
+            f"semantics={semantics}, status={execution.status}, "
+            f"executed={execution.executed}, tests_run={execution.tests_run}, "
+            f"tests_failed={execution.tests_failed}, exit={execution.exit_code}."
         ),
         " ".join(execution.command),
         execution.target + ".t.sol",
@@ -75,7 +89,7 @@ def classify_authorization_blind_execution(
         hypothesis.related_functions,
     )
     return AuthorizationBlindOutcome(
-        updated, execution, evidence, internal_status, benchmark_status
+        updated, execution, evidence, internal_status, benchmark_status, measurement_verdict
     )
 
 
