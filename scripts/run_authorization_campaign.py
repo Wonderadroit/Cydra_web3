@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import re
 import shutil
+import sys
 
 from cydra.authorization_runtime import classify_authorization_blind_execution
 from cydra.blind_authorization import generate_blind_authorization_test_from_experiment
@@ -838,8 +839,14 @@ def main() -> int:
         # Persist evidence on every exit path, including returns and SystemExit.
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
-            if payload is not None:
-                args.output.write_text(json.dumps(_json(payload), indent=2) + "\n", encoding="utf-8")
+            if payload is None:
+                active_error = sys.exc_info()[1]
+                payload = {
+                    "classification": "RUNNER_ABORTED",
+                    "finding_gate": "NOT_READY",
+                    "failure_reason": str(active_error) if active_error else "campaign exited before producing a result payload",
+                }
+            args.output.write_text(json.dumps(_json(payload), indent=2) + "\n", encoding="utf-8")
             if generated is not None and Path(generated).is_file():
                 generated_dir = args.output.parent / "generated-tests"
                 generated_dir.mkdir(parents=True, exist_ok=True)
