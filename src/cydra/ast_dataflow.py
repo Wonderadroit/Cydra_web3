@@ -129,7 +129,7 @@ def _operator_contexts(body: dict[str, Any], states: dict[int, str]) -> dict[int
     return roles
 
 
-def extract_ast_relationships(ast: dict[str, Any], file: str) -> list[SemanticRelationshipEvidence]:
+def _extract_direct(ast: dict[str, Any], file: str, global_function_nodes: dict[int, dict[str, Any]]) -> tuple[list[SemanticRelationshipEvidence], dict[int, set[int]]]:
     """Extract compiler-linked state reads/writes from AST operator context.
 
     Declaration IDs are authoritative. Canonical SystemModel relation names are used
@@ -209,101 +209,119 @@ def extract_ast_relationships(ast: dict[str, Any], file: str) -> list[SemanticRe
             evidence.append(SemanticRelationshipEvidence(
                 **{**common, "relation": "reference", "confidence": 0.90,
                    "metadata": {"function_kind": kind, "semantic_relation": semantic_role}}))
-# Attribute state effects of same-source internal calls to their callers. A
-    # public setter that delegates its storage mutation to a private/internal
-    # helper still changes that state; omitting this edge can hide protected
-    # state transitions from authorization reasoning. Keep this conservative:
-    # only direct identifier calls resolving to a FunctionDefinition in this
-    # AST are propagated (not arbitrary external/member calls).
-    function_nodes = {
-        node["id"]: node
-        for node in _walk(ast)
-        if node.get("nodeType") == "FunctionDefinition" and isinstance(node.get("id"), int)
-    }
-    function_names = {
-        function_id: (
-            node.get("name") if isinstance(node.get("name"), str) and node.get("name")
-            else node.get("kind", "anonymous")
-        )
-        for function_id, node in function_nodes.items()
-    }
-    calls_by_function: dict[int, set[int]] = {function_id: set() for function_id in function_nodes}
-    for function_id, node in function_nodes.items():
-        body = node.get("body")
-        if not isinstance(body, dict):
-            continue
-        for call in _walk(body):
-            if call.get("nodeType") != "FunctionCall":
-                continue
-            expression = call.get("expression")
-            if not isinstance(expression, dict) or expression.get("nodeType") != "Identifier":
-                continue
-            callee_id = expression.get("referencedDeclaration")
-            if isinstance(callee_id, int) and callee_id in function_nodes and callee_id != function_id:
-                calls_by_function[function_id].add(callee_id)
 
-    # Fixed-point closure handles helper chains while the seen key prevents
-    # recursive internal calls from producing duplicate or unbounded evidence.
-    seen_effects = {
-        (item.function_ast_node_id, item.relation, item.target, item.target_ast_node_id)
-        for item in evidence
-        if item.relation != "reference"
-    }
+    local_function_nodes = {node["id"]: node for node in _walk(ast)
+        if node.get("nodeType") == "FunctionDefinition" and isinstance(node.get("id"), int)}
+    calls_by_function: dict[int, set[int]] = {function_id: set() for function_id in local_function_nodes}
+    for function_id, node in local_function_nodes.items():
+        body = node.get("body")
+        if not isinstance(body, dict): continue
+        for call in _walk(body):
+            if call.get("nodeType") != "FunctionCall": continue
+            expression = call.get("expression")
+            if not isinstance(expression, dict) or expression.get("nodeType") != "Identifier": continue
+            callee_id = expression.get("referencedDeclaration")
+            if isinstance(callee_id, int) and callee_id in global_function_nodes and callee_id != function_id:
+                calls_by_function[function_id].add(callee_id)
+    return evidence, calls_by_function
+
+
+def _dedup_provenance(evidence: list[SemanticRelationshipEvidence]) -> tuple[SemanticRelationshipEvidence, ...]:
+    seen: set[tuple[int | None, str, str]] = set()
+    result: list[SemanticRelationshipEvidence] = []
+    for item in evidence:
+        key = (item.function_ast_node_id, item.target, item.relation)
+        if key not in seen:
+            seen.add(key)
+            result.append(item)
+    return tuple(result)
+
+
+def _fixed_point_propagate(global_calls: dict[int, set[int]],
+    effects_by_function: dict[int, list[SemanticRelationshipEvidence]],
+    global_function_nodes: dict[int, dict[str, Any]], declarations: dict[int, dict[str, Any]],
+    function_files: dict[int, str]) -> list[SemanticRelationshipEvidence]:
+    propagated: list[SemanticRelationshipEvidence] = []
+    seen = {(item.function_ast_node_id, item.target, item.relation)
+        for items in effects_by_function.values() for item in items
+        if item.relation in {"reads", "writes", "transition_expression"}}
     changed = True
     while changed:
         changed = False
-        for caller_id, callees in calls_by_function.items():
-            caller = function_nodes[caller_id]
+        for caller_id, callees in global_calls.items():
+            caller = global_function_nodes.get(caller_id)
+            if caller is None: continue
             caller_kind = caller.get("kind")
-            caller_name = function_names[caller_id]
+            caller_name = caller.get("name") or caller_kind or "anonymous"
+            body = caller.get("body")
+            call_sites: dict[int, list[dict[str, Any]]] = {}
+            if isinstance(body, dict):
+                for call in _walk(body):
+                    expression = call.get("expression")
+                    if call.get("nodeType") == "FunctionCall" and isinstance(expression, dict) and expression.get("nodeType") == "Identifier":
+                        callee_id = expression.get("referencedDeclaration")
+                        if isinstance(callee_id, int) and callee_id in callees:
+                            call_sites.setdefault(callee_id, []).append(call)
             for callee_id in callees:
-                call_sites = []
-                body = caller.get("body")
-                if isinstance(body, dict):
-                    for call in _walk(body):
-                        expression = call.get("expression")
-                        if (
-                            call.get("nodeType") == "FunctionCall"
-                            and isinstance(expression, dict)
-                            and expression.get("nodeType") == "Identifier"
-                            and expression.get("referencedDeclaration") == callee_id
-                        ):
-                            call_sites.append(call)
-                callee_effects = [
-                    item for item in evidence
-                    if item.function_ast_node_id == callee_id
-                    and item.relation in {"reads", "writes", "transition_expression"}
-                ]
-                for call_site in call_sites:
-                    for effect in callee_effects:
-                        key = (caller_id, effect.relation, effect.target, effect.target_ast_node_id)
-                        if key in seen_effects:
-                            continue
-                        seen_effects.add(key)
-                        inherited = (effect.metadata or {}).get("propagated_from_internal_call")
-                        propagated_from = inherited or function_names[callee_id]
-                        evidence.append(SemanticRelationshipEvidence(
-                            contract=str(
-                                declarations.get(caller.get("scope"), {}).get("name", "unknown")
-                                if isinstance(caller.get("scope"), int) else "unknown"
-                            ),
-                            function=str(caller_name),
-                            relation=effect.relation,
-                            target=effect.target,
-                            confidence=min(effect.confidence, 0.94),
-                            source=f"solc-json-ast-internal-call:{file}",
-                            ast_node_id=_node_id(call_site),
-                            source_location=_location(call_site),
-                            function_ast_node_id=caller_id,
-                            target_ast_node_id=effect.target_ast_node_id,
-                            metadata={
-                                "function_kind": caller_kind,
-                                "semantic_relation": (effect.metadata or {}).get("semantic_relation", effect.relation),
-                                "propagated_from_internal_call": propagated_from,
-                                "propagation": "transitive-internal-call" if inherited else "internal-call",
-                            },
-                        ))
-                        changed = True
-    return evidence
+                sites = call_sites.get(callee_id, [])
+                if not sites: continue
+                for effect in tuple(effects_by_function.get(callee_id, ())):
+                    if effect.relation not in {"reads", "writes", "transition_expression"}: continue
+                    key = (caller_id, effect.target, effect.relation)
+                    if key in seen: continue
+                    seen.add(key)
+                    callee = global_function_nodes.get(callee_id, {})
+                    inherited = (effect.metadata or {}).get("propagated_from_internal_call")
+                    propagated_from = inherited or callee.get("name") or callee.get("kind") or "anonymous"
+                    scope = caller.get("scope")
+                    contract = declarations.get(scope, {}).get("name", "unknown") if isinstance(scope, int) else "unknown"
+                    item = SemanticRelationshipEvidence(contract=str(contract), function=str(caller_name),
+                        relation=effect.relation, target=effect.target, confidence=min(effect.confidence, 0.94),
+                        source=f"solc-json-ast-internal-call:{function_files.get(caller_id, 'unknown')}",
+                        ast_node_id=_node_id(sites[0]), source_location=_location(sites[0]),
+                        function_ast_node_id=caller_id, target_ast_node_id=effect.target_ast_node_id,
+                        metadata={"function_kind": caller_kind,
+                            "semantic_relation": (effect.metadata or {}).get("semantic_relation", effect.relation),
+                            "propagated_from_internal_call": propagated_from,
+                            "propagation": "transitive-internal-call" if inherited else "internal-call"})
+                    effects_by_function.setdefault(caller_id, []).append(item)
+                    propagated.append(item)
+                    changed = True
+    return propagated
 
 
+def extract_compilation_relationships(asts: list[tuple[str, dict[str, Any]]] | list[dict[str, Any]]) -> tuple[SemanticRelationshipEvidence, ...]:
+    """Extract direct relationships then propagate effects over the compilation-wide call graph."""
+    normalized: list[tuple[str, dict[str, Any]]] = []
+    for index, value in enumerate(asts):
+        if isinstance(value, tuple) and len(value) == 2 and isinstance(value[1], dict):
+            normalized.append((str(value[0]), value[1]))
+        elif isinstance(value, dict):
+            normalized.append((f"source-{index}.sol", value))
+    global_function_nodes: dict[int, dict[str, Any]] = {}
+    declarations: dict[int, dict[str, Any]] = {}
+    function_files: dict[int, str] = {}
+    for file, ast in normalized:
+        for node in _walk(ast):
+            node_id = node.get("id")
+            if isinstance(node_id, int): declarations[node_id] = node
+            if node.get("nodeType") == "FunctionDefinition" and isinstance(node_id, int):
+                global_function_nodes[node_id] = node
+                function_files[node_id] = file
+    all_evidence: list[SemanticRelationshipEvidence] = []
+    effects_by_function: dict[int, list[SemanticRelationshipEvidence]] = {}
+    global_calls: dict[int, set[int]] = {}
+    for file, ast in normalized:
+        direct, edges = _extract_direct(ast, file, global_function_nodes)
+        all_evidence.extend(direct)
+        for item in direct:
+            if item.function_ast_node_id is not None and item.relation != "reference":
+                effects_by_function.setdefault(item.function_ast_node_id, []).append(item)
+        for caller_id, callees in edges.items(): global_calls.setdefault(caller_id, set()).update(callees)
+    all_evidence.extend(_fixed_point_propagate(global_calls, effects_by_function, global_function_nodes, declarations, function_files))
+    return _dedup_provenance(all_evidence)
+
+
+def extract_ast_relationships(ast: dict[str, Any], file: str) -> list[SemanticRelationshipEvidence]:
+    """Backward-compatible wrapper for single-AST callers."""
+    return list(extract_compilation_relationships([(file, ast)]))
