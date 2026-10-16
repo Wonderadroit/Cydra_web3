@@ -1,0 +1,8 @@
+{
+  "source": "src/Foo.sol",
+  "staged_files": [
+    "node_modules/pkg/Bar.sol",
+    "src/Foo.sol"
+  ],
+  "compile": true
+}

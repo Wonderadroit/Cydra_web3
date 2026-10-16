@@ -1,0 +1,8 @@
+{
+  "source": "src/Entry.sol",
+  "staged_files": [
+    "src/Entry.sol",
+    "node_modules/@openzeppelin/contracts/access/Ownable.sol"
+  ],
+  "compile": true
+}

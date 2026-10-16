@@ -231,13 +231,9 @@ def _materialize_target_dependencies(project: Path) -> dict:
 
 
 def _prepare_isolated_foundry_project(target_root: Path, source: Path, destination: Path) -> Path:
-    """Copy only the target's local Solidity import closure into a clean Foundry root."""
+    """Stage the local Solidity import closure using ordered, project-root-aware resolution."""
     source_root = next(
-        (
-            candidate
-            for candidate in (source.parents)
-            if candidate.name in {"src", "contracts"}
-        ),
+        (candidate for candidate in source.parents if candidate.name in {"src", "contracts"}),
         target_root,
     )
     src_root = destination / "src"
@@ -245,64 +241,120 @@ def _prepare_isolated_foundry_project(target_root: Path, source: Path, destinati
     test_root = destination / "test" / "generated"
     test_root.mkdir(parents=True, exist_ok=True)
 
-    pending = [source]
+    # Read the project's remappings once. Resolve each import in a stable order:
+    # importer-relative, explicit remapping, npm package, project-root path.
+    remappings: list[tuple[str, str]] = []
+    remappings_file = target_root / "remappings.txt"
+    if remappings_file.is_file():
+        for line in remappings_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            prefix, destination_path = line.split("=", 1)
+            remappings.append((prefix, destination_path))
+    remappings.sort(key=lambda item: len(item[0]), reverse=True)
+    generated_remappings: dict[str, str] = {}
+
+    def in_checkout(path: Path) -> bool:
+        try:
+            path.resolve().relative_to(target_root.resolve())
+            return True
+        except ValueError:
+            return False
+
+    def staged_path(path: Path) -> Path:
+        """Map a pinned-checkout file to its deterministic isolated-project path."""
+        resolved = path.resolve()
+        try:
+            return src_root / resolved.relative_to(source_root)
+        except ValueError:
+            relative = resolved.relative_to(target_root.resolve())
+            if relative.parts and relative.parts[0] in {"node_modules", "lib"}:
+                # Preserve Foundry's conventional root-level dependency trees.
+                return destination / relative
+            return src_root / relative
+
+    def add_generated_remapping(prefix: str, staged_directory: Path) -> None:
+        destination_value = staged_directory.relative_to(destination).as_posix().rstrip("/") + "/"
+        prior = generated_remappings.get(prefix)
+        if prior is not None and prior != destination_value:
+            raise ValueError(
+                f"ambiguous import remapping for {prefix!r}: {prior!r} vs {destination_value!r}"
+            )
+        generated_remappings[prefix] = destination_value
+
+    def resolve_import(imported: str, importer: Path) -> Path | None:
+        # 1. Solidity relative import: resolve from the importing source file.
+        if imported.startswith("."):
+            candidate = (importer.parent / imported).resolve()
+            return candidate if in_checkout(candidate) and candidate.is_file() else None
+
+        # 2. Explicit project remappings, longest prefix first.
+        for prefix, destination_path in remappings:
+            if imported.startswith(prefix):
+                candidate = (target_root / destination_path / imported[len(prefix):]).resolve()
+                if in_checkout(candidate) and candidate.is_file():
+                    return candidate
+                # A matching remapping is authoritative; don't silently bypass it.
+                return None
+
+        # 3. Standard npm resolution works with scoped and unscoped packages,
+        # even when the target has no remappings.txt.
+        package_candidate = (target_root / "node_modules" / imported).resolve()
+        if in_checkout(package_candidate) and package_candidate.is_file():
+            parts = imported.split("/")
+            package_parts = parts[:2] if parts[0].startswith("@") and len(parts) >= 2 else parts[:1]
+            package_prefix = "/".join(package_parts).rstrip("/") + "/"
+            package_directory = target_root / "node_modules" / Path(*package_parts)
+            add_generated_remapping(package_prefix, staged_path(package_directory))
+            return package_candidate
+
+        # 4. Project-root-relative import, including contracts/, src/, and
+        # repository-local vendor layouts. Derive a remapping to the staged path
+        # so the original import string remains valid after relocation.
+        project_candidate = (target_root / imported).resolve()
+        if in_checkout(project_candidate) and project_candidate.is_file():
+            parts = imported.split("/")
+            prefix = parts[0].rstrip("/") + "/"
+            root_directory = (target_root / parts[0]).resolve()
+            staged_directory = staged_path(root_directory)
+            add_generated_remapping(prefix, staged_directory)
+            return project_candidate
+
+        # 5. Fail closed. Leave the original import unresolved so solc/Foundry
+        # reports the exact missing key; never invent a path or copy outside checkout.
+        return None
+
+    pending = [source.resolve()]
     copied: set[Path] = set()
     while pending:
-        current = pending.pop()
-        try:
-            relative = current.relative_to(source_root)
-            destination_file = src_root / relative
-        except ValueError:
-            relative = current.relative_to(target_root)
-            # npm packages must remain at the isolated Foundry root because
-            # remappings such as @openzeppelin/=node_modules/@openzeppelin/
-            # resolve from there. Other dependency trees are staged under src/.
-            if relative.parts and relative.parts[0] == "node_modules":
-                destination_file = destination / relative
-            else:
-                destination_file = src_root / relative
+        current = pending.pop().resolve()
         if current in copied:
             continue
         copied.add(current)
+        destination_file = staged_path(current)
         destination_file.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(current, destination_file)
 
         text = current.read_text(encoding="utf-8")
-        remappings = []
-        remappings_file = target_root / "remappings.txt"
-        if remappings_file.exists():
-            for line in remappings_file.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                prefix, destination_path = line.split("=", 1)
-                remappings.append((prefix, destination_path))
         for imported in _IMPORT_RE.findall(text):
-            if imported.startswith("."):
-                dependency = (current.parent / imported).resolve()
-            elif imported.startswith("contracts/"):
-                dependency = (target_root / imported).resolve()
-            else:
-                dependency = None
-                for prefix, destination_path in sorted(remappings, key=lambda item: len(item[0]), reverse=True):
-                    if imported.startswith(prefix):
-                        suffix = imported[len(prefix):]
-                        dependency = (target_root / destination_path / suffix).resolve()
-                        break
-                if dependency is None:
-                    continue
-            if dependency.is_file() and dependency not in copied:
+            dependency = resolve_import(imported, current)
+            if dependency is not None and dependency not in copied:
                 pending.append(dependency)
 
-    remapping_lines = []
+    remapping_lines: list[str] = []
     for prefix, destination_path in remappings:
-        # npm remapping destinations already include their root prefix. Do not
-        # prepend node_modules again; doing so creates node_modules/node_modules/...
-        # Non-npm dependencies copied into src/ need that staging prefix.
-        if destination_path.startswith("node_modules/"):
+        # npm remapping destinations already include their root prefix. Other
+        # checkout dependencies are staged under src/.
+        if destination_path.startswith(("node_modules/", "lib/")):
             remapping_lines.append(f"{prefix}={destination_path}")
         else:
             remapping_lines.append(f"{prefix}=src/{destination_path}")
+    existing_prefixes = {line.split("=", 1)[0] for line in remapping_lines}
+    for prefix, destination_path in sorted(generated_remappings.items()):
+        if prefix not in existing_prefixes:
+            remapping_lines.append(f"{prefix}={destination_path}")
+
     remapping_literal = ", ".join(repr(item) for item in remapping_lines)
     (destination / "foundry.toml").write_text(
         '[profile.default]\n'
@@ -317,11 +369,10 @@ def _prepare_isolated_foundry_project(target_root: Path, source: Path, destinati
     hardhat_console.parent.mkdir(parents=True, exist_ok=True)
     hardhat_console.write_text("pragma solidity ^0.6.12; library console {}\n", encoding="utf-8")
     (destination / "remappings.txt").write_text(
-        "\n".join(remapping_lines) + "\n",
+        "\n".join(remapping_lines) + ("\n" if remapping_lines else ""),
         encoding="utf-8",
     )
     return test_root
-
 
 def _git(cwd: Path, *args: str) -> str:
     return subprocess.run(
