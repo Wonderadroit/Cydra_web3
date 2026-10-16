@@ -113,7 +113,7 @@ def generate_blind_authorization_test_from_experiment(
     # state variable written by the target operation.
     for written in function.writes:
         match = re.search(
-            rf"\\b(address(?:\\s+payable)?|bool|uint\\d*|int\\d*)\\s+public\\s+{re.escape(written)}\\s*;",
+            rf"\b(address(?:\s+payable)?|bool|uint\d*|int\d*)\s+public\s+{re.escape(written)}\s*;",
             source_text,
         )
         if match:
@@ -130,7 +130,7 @@ def generate_blind_authorization_test_from_experiment(
     modifier_bodies = {
         match.group(1): match.group(2)
         for match in re.finditer(
-            r"\\bmodifier\\s+([A-Za-z_]\\w*)\\s*\\([^)]*\\)\\s*\\{([^{}]*)\\}",
+            r"\bmodifier\s+([A-Za-z_]\w*)\s*\([^)]*\)\s*\{([^{}]*)\}",
             source_text,
             re.DOTALL,
         )
@@ -141,14 +141,14 @@ def generate_blind_authorization_test_from_experiment(
         if body is None:
             continue
         guard = re.search(
-            r"\\bmsg\\s*\\.\\s*sender\\s*==\\s*([A-Za-z_]\\w*)|"
-            r"\\b([A-Za-z_]\\w*)\\s*==\\s*msg\\s*\\.\\s*sender\\b",
+            r"\bmsg\s*\.\s*sender\s*==\s*([A-Za-z_]\w*)|"
+            r"\b([A-Za-z_]\w*)\s*==\s*msg\s*\.\s*sender\b",
             body,
         )
         if guard:
             candidate = guard.group(1) or guard.group(2)
             if re.search(
-                rf"\\baddress(?:\\s+payable)?\\s+public\\s+{re.escape(candidate)}\\s*;",
+                rf"\baddress(?:\s+payable)?\s+public\s+{re.escape(candidate)}\s*;",
                 source_text,
             ):
                 principal = candidate
@@ -170,12 +170,12 @@ def generate_blind_authorization_test_from_experiment(
             continue
         if state_type == "address payable":
             mutable_value = (
-                f"address payable nextValue = payable(address(0xBEEF));\\n"
+                f"address payable nextValue = payable(address(0xBEEF));\n"
                 f"        if (nextValue == target.{state_getter}()) nextValue = payable(address(0xF00D));"
             )
         elif state_base == "address":
             mutable_value = (
-                f"address nextValue = address(0xBEEF);\\n"
+                f"address nextValue = address(0xBEEF);\n"
                 f"        if (nextValue == target.{state_getter}()) nextValue = address(0xF00D);"
             )
         elif state_base == "bool":
@@ -199,7 +199,7 @@ def generate_blind_authorization_test_from_experiment(
     argument_list = ", ".join(arguments)
     state_snapshot = f"{state_type} beforeState = target.{state_getter}();"
     state_after = f"target.{state_getter}()"
-    source = f\'''// SPDX-License-Identifier: UNLICENSED
+    source = f'''// SPDX-License-Identifier: UNLICENSED
 pragma solidity {pragma};
 // Hypothesis: {hypothesis.hypothesis_id}
 // Experiment: {experiment.experiment_id}
