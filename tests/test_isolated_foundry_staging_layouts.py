@@ -99,7 +99,7 @@ LAYOUTS = [
     ("layout", "imports", "remappings", "dependencies", "expected_paths"),
     LAYOUTS,
 )
-def test_isolated_foundry_staging_supports_five_dependency_layouts(
+def test_isolated_foundry_staging_supports_six_dependency_layouts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     layout: str,
@@ -146,10 +146,16 @@ def test_isolated_foundry_staging_supports_five_dependency_layouts(
             if command_list and command_list[0].endswith("npm") and "ci" in command_list:
                 observed_commands.append(command_list)
                 assert "--ignore-scripts" in command_list
-                _write(
-                    target / "node_modules/@openzeppelin/contracts/access/AccessControl.sol",
-                    "pragma solidity ^0.8.20; contract AccessControl {}",
-                )
+                if layout == "npm-no-remappings":
+                    _write(
+                        target / "node_modules/@openzeppelin/contracts/access/Ownable.sol",
+                        "pragma solidity ^0.8.20; abstract contract Ownable {}",
+                    )
+                else:
+                    _write(
+                        target / "node_modules/@openzeppelin/contracts/access/AccessControl.sol",
+                        "pragma solidity ^0.8.20; contract AccessControl {}",
+                    )
                 return subprocess.CompletedProcess(command_list, 0, "installed fixture", "")
             return original_run(command, *args, **kwargs)
 
