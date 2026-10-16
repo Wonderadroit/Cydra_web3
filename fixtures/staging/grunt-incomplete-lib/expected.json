@@ -1,0 +1,9 @@
+{
+  "source": "src/Foo.sol",
+  "staged_files": [
+    "lib/vendor/Bar.sol",
+    "lib/vendor/Nested.sol",
+    "src/Foo.sol"
+  ],
+  "compile": true
+}
