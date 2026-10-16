@@ -262,6 +262,6 @@ contract CydraBlindAuthorizationTest {{
         );
     }}
 }}
-\'''
+'''
     path.write_text(source, encoding="utf-8")
     return path
