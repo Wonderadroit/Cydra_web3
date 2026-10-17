@@ -44,4 +44,12 @@ Artifact: [campaign artifact](https://github.com/Wonderadroit/Cydra_web3/actions
 - Negative boundary: MemberAccess roots are rejected; local struct fields are not treated as contract-state mappings.
 - Tests: 5 focused tests passed in the full regression.
 - CI evidence: implementation commit e8010881698008943ac32d0ee4ba96c0fc20e077 passed Python Regression run [#39077235129](https://github.com/Wonderadroit/Cydra_web3/actions/runs/39077235129) and pull-request regression [#39077238528](https://github.com/Wonderadroit/Cydra_web3/actions/runs/39077238528). Authorization campaign job was skipped; no target experiment or finding is claimed.
-- Observation interfaces unchanged. Day 4 may begin with ArrayPushWrite as a separate capability.
+- Observation interfaces unchanged. Day 4 implemented ArrayPushWrite as a separate capability.
+
+
+## Week 1 Day 4 — complete
+- ArrayPushWrite: recognizes FunctionCall nodes whose callee is a push/pop MemberAccess and whose receiver resolves through zero or more IndexAccess nodes to a compiler-identified state-variable Identifier.
+- Root extraction is explicit: `_validators[virtualId].push(validator)` returns `_validators`; indexed entries are not treated as the write target.
+- Tests: 5 focused tests passed in full regression, including mapping-entry push, direct state-array push, mapping-entry pop, local-array rejection by declaration identity, and base-root extraction for a mapping-entry array.
+- CI evidence: implementation commit [67ad55935219ff4563bb42377f73783c4e3a9a3f](https://github.com/Wonderadroit/Cydra_web3/commit/67ad55935219ff4563bb42377f73783c4e3a9a3f) passed Python Regression run [#39077595226](https://github.com/Wonderadroit/Cydra_web3/actions/runs/39077595226). The authorization workflow's Python regression also passed in [#39077595229](https://github.com/Wonderadroit/Cydra_web3/actions/runs/39077595229); its blind authorization campaign job was skipped. No Virtuals campaign or finding is claimed.
+- WriteForm and observation interfaces unchanged. Day 5 is MappingGetterObservation only; Day 6 is ExplicitViewReaderObservation. Virtuals remains open until a campaign artifact proves the expected write roots and observation path are wired.
