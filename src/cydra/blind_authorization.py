@@ -372,26 +372,26 @@ def generate_blind_authorization_test_from_experiment(
     )
     observer_signature = f"{state_getter}({observer_parameter_types})"
     observer_encode_args = f", {observer_arguments}" if observer_arguments else ""
-    state_snapshot = (
-        f"(bool __stateOk, bytes memory __stateData) = address(target).staticcall("
-        f'abi.encodeWithSignature("{observer_signature}"{observer_encode_args}));\n'
-        f'        require(__stateOk && __stateData.length >= 32, '
-        f'"CYDRA_MEASUREMENT_ASSERTION: preconditions_not_established:state_unreadable");\n'
-        f"        {state_type} beforeState = abi.decode(__stateData, ({state_type}));"
-    )
+    state_snapshot = "\\n".join((
+        "(bool __stateOk, bytes memory __stateData) = address(target).staticcall("
+        f'abi.encodeWithSignature("{observer_signature}"{observer_encode_args}));',
+        'require(__stateOk && __stateData.length >= 32, '
+        '"CYDRA_MEASUREMENT_ASSERTION: preconditions_not_established:state_unreadable");',
+        f"{state_type} beforeState = abi.decode(__stateData, ({state_type}));",
+    ))
     state_after = observer_call
     if principal is not None:
-        principal_setup = (
+        principal_setup = "\\n".join((
             f'(bool __ownerOk, bytes memory __ownerData) = address(target).staticcall('
-            f'abi.encodeWithSignature("{principal}()"));\\n'
-            '        require(__ownerOk && __ownerData.length >= 32, '
-            '"CYDRA_MEASUREMENT_ASSERTION: preconditions_not_established:authorized_control_unavailable");\\n'
-            '        address authorized = abi.decode(__ownerData, (address));\\n'
-            '        require(authorized != address(0), '
-            '"CYDRA_MEASUREMENT_ASSERTION: preconditions_not_established:authorized_control_unavailable");\\n'
-            '        require(authorized != unauthorized, '
-            '"CYDRA_MEASUREMENT_ASSERTION: preconditions_not_established:authorized_caller_not_distinct");'
-        )
+            f'abi.encodeWithSignature("{principal}()"));',
+            'require(__ownerOk && __ownerData.length >= 32, '
+            '"CYDRA_MEASUREMENT_ASSERTION: preconditions_not_established:authorized_control_unavailable");',
+            'address authorized = abi.decode(__ownerData, (address));',
+            'require(authorized != address(0), '
+            '"CYDRA_MEASUREMENT_ASSERTION: preconditions_not_established:authorized_control_unavailable");',
+            'require(authorized != unauthorized, '
+            '"CYDRA_MEASUREMENT_ASSERTION: preconditions_not_established:authorized_caller_not_distinct");',
+        ))
         control_lines = [
             "        vm.prank(unauthorized);",
             "        (bool unauthorizedOk,) = address(target).call(payload);",
