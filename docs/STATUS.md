@@ -65,3 +65,15 @@ Artifact: [campaign artifact](https://github.com/Wonderadroit/Cydra_web3/actions
 - Deferred defensive gap: MappingGetterObservation does not yet validate an unexpected runtime return type (return_type_mismatch). Direct compiler-backed mapping getters are type-checked by Solidity; add a focused test if a real target exposes this mismatch. This gap does not block Day 6.
 - Integration audit before Day 6: blind_authorization.py imports PublicGetterObservation but still contains its own inline resolver; it does not dispatch through an observation-method list, and MappingGetterObservation is not called there. ast_dataflow.py contains none of ScalarWrite, NestedMappingWrite, or ArrayPushWrite; the write-form capabilities are not dispatched there. Treat both chains as unwired until explicit integration and regression prove otherwise.
 
+## Integration gate — do not run Virtuals until:
+- [ ] WriteForm preserves indexed args (or extract_args added)
+- [ ] _resolve_state_observer dispatches through capability list, records method_used
+- [ ] ast_dataflow dispatches through write-form list, records write_method
+- [ ] Two production-entry-point integration tests pass
+- [ ] Full regression green
+
+## Virtuals acceptance
+- [ ] observed_writes includes `_validators`
+- [ ] verdict_reason != `state_unreadable`
+
+**Current gate status:** blocked. The observation capabilities and write-form capabilities have unit-level implementations, but production dispatch is not wired. Do not run the Virtuals campaign until every integration-gate checkbox above is supported by source and test evidence. Passing the gate establishes wiring only; it does not establish a vulnerability.
