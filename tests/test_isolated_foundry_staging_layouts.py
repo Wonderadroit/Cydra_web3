@@ -76,7 +76,7 @@ LAYOUTS = [
                 "pragma solidity ^0.8.20; contract AccessControl {}",
         },
         [
-            "src/lib/forge-std/src/Test.sol",
+            "lib/forge-std/src/Test.sol",
             "node_modules/@openzeppelin/contracts/access/AccessControl.sol",
         ],
         id="mixed-npm-and-lib",
