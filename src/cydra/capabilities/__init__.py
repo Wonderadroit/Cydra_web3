@@ -6,6 +6,7 @@ from .write_form import WriteForm
 from .owner_shape import OwnerShape
 from .public_getter_observation import PublicGetterObservation
 from .scalar_write import ScalarWrite
+from .nested_mapping_write import NestedMappingWrite
 
 __all__ = [
     "AuthorityShape",
@@ -14,4 +15,5 @@ __all__ = [
     "OwnerShape",
     "PublicGetterObservation",
     "ScalarWrite",
+    "NestedMappingWrite",
 ]

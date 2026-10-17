@@ -37,3 +37,10 @@ Artifact: [campaign artifact](https://github.com/Wonderadroit/Cydra_web3/actions
 - ScalarWrite: direct and compound scalar assignments use constructor-injected compiler declaration IDs; local shadowing is rejected and struct-field writes remain deferred.
 - Tests: 4 PublicGetterObservation tests and 5 ScalarWrite tests.
 - Gate: full Python regression passed on the implementation-equivalent code at commit 88f5cee86d704368aa0675f7779c194bc69990e0 (run #39076655550). The only subsequent change in this commit is this status entry.
+
+
+## Week 1 Day 3 — in progress
+- NestedMappingWrite: implemented; direct indexed state-variable roots only, arbitrary index depth, assignment and compound-assignment operators.
+- Negative boundary: MemberAccess roots are rejected; local struct fields are not treated as contract-state mappings.
+- Tests: 5 focused tests added.
+- Gate: full Python regression green before Day 4; no observation interfaces changed.
