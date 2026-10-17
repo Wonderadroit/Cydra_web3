@@ -84,6 +84,12 @@ jobs:
         with:
           python-version: "3.12"
       - uses: foundry-rs/foundry-toolchain@v1
+      - name: Set up pnpm for pinned target dependency materialization
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - name: Verify pnpm availability
+        run: pnpm --version
       - run: python -m pip install --upgrade pip pytest
       - run: python -m pip install -e .
       - name: Record scope and immutable target intake
