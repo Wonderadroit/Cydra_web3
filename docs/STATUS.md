@@ -134,3 +134,9 @@ The parser now models direct writes, same-contract helper-mediated writes, payab
 - Candidate binding remains a separate issue: the run generated `H-AUTH-claim`, not the requested `X-H-AUTH-setSlasher`. Track only in Issue #47: https://github.com/Wonderadroit/Cydra_web3/issues/47. Do not change candidate selection in the staging-fix cycle.
 - `no_authority_getter` is not diagnostic evidence about `setSlasher`, because the executed candidate was `claim`. Defer that interpretation until the candidate-binding defect is fixed and the intended function is tested.
 - No finding, security pass, or authorization-bypass reproduction is claimed.
+
+## Open actions
+- Trace panic 0x51 in run 39048742571's generated test (artifact: generated-tests/H-AUTH-addValidator.t.sol)
+- Then: preconditions probe in blind_authorization.py
+- Then: score Virtuals at failure_layer:preconditions
+- Then: pick next supported-class target
