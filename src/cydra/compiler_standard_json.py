@@ -77,7 +77,7 @@ def _resolve_import(project: Path, importer: str, spec: str,
     return None
 
 
-def _closure(project: Path, entry: Path) -> tuple[dict[str, str], list[str], dict[str, str]]:
+def _closure_with_paths(project: Path, entry: Path) -> tuple[dict[str, str], list[str], dict[str, str]]:
     remappings = _remappings(project)
     entry_unit = entry.resolve().relative_to(project.resolve()).as_posix()
     contents: dict[str, str] = {}
@@ -119,6 +119,12 @@ def _closure(project: Path, entry: Path) -> tuple[dict[str, str], list[str], dic
             elif resolved[0] not in contents:
                 pending.append(resolved)
     return contents, sorted(unresolved), source_paths
+
+
+def _closure(project: Path, entry: Path) -> tuple[dict[str, str], list[str]]:
+    \"\"\"Backward-compatible content closure for callers that do not need disk paths.\"\"\"
+    contents, unresolved, _source_paths = _closure_with_paths(project, entry)
+    return contents, unresolved
 
 
 def _compatible_version(contents: dict[str, str], requested: str | None = None) -> tuple[str | None, str]:
@@ -175,7 +181,7 @@ def compile_standard_json(project: Path, entry: Path) -> dict[str, Any]:
                 "process_exit_status": None, "unresolved_imports": [],
                 "compiler_command": ["solcx.compile_standard"], "source_paths": {}}
     try:
-        contents, unresolved, source_paths = _closure(project.resolve(), entry.resolve())
+        contents, unresolved, source_paths = _closure_with_paths(project.resolve(), entry.resolve())
     except (OSError, ValueError) as exc:
         return {"status": "source_closure_failed", "solc_version_used": None,
                 "errors_count": 0, "fatal_errors": [], "sources_parsed": [],
