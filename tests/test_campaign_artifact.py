@@ -88,6 +88,7 @@ def test_real_campaign_runner_persists_mismatch_json_and_generated_test(
     """Exercise main()'s real mismatch return and finally-based artifact persistence."""
     import subprocess
     import sys
+    from pathlib import Path
 
     import scripts.run_authorization_campaign as campaign
 
@@ -119,7 +120,7 @@ def test_real_campaign_runner_persists_mismatch_json_and_generated_test(
     )
     monkeypatch.setattr(
         campaign, "compile_state_effects",
-        lambda project, source: SimpleNamespace(status="OK", evidence=()),
+        lambda project, source: SimpleNamespace(status="OK", evidence=(), source_closure=(("contracts/Foo.sol", str(source)),)),
     )
     def investigate(target_source, **kwargs):
         contract = SimpleNamespace(name="Foo", source=str(target_source), functions=(function,))
@@ -130,10 +131,13 @@ def test_real_campaign_runner_persists_mismatch_json_and_generated_test(
 
     monkeypatch.setattr(campaign, "investigate_authorization", investigate)
 
-    def prepare(checkout, target_source, execution_project):
-        destination = execution_project / "src" / "Foo.sol"
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(target_source.read_text(encoding="utf-8"), encoding="utf-8")
+    def prepare(checkout, closure, execution_project, *, required_keys=()):
+        for key in required_keys:
+            assert key in closure
+        for key, disk_path in closure.items():
+            destination = execution_project / key
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(Path(disk_path).read_text(encoding="utf-8"), encoding="utf-8")
 
     monkeypatch.setattr(campaign, "_prepare_isolated_foundry_project", prepare)
 
