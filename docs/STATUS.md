@@ -149,3 +149,8 @@ The parser now models direct writes, same-contract helper-mediated writes, payab
 - Executed CYDRA SHA: `112d50a94e3ee34d33a09c56e0d8f51bff0d7c33`; direct-solc ancestry preflight passed and Python regression passed.
 - Foundry trace: deployment succeeds and emits `Initialized(version: 18446744073709551615)`. Before calling `addValidator`, the first `validatorScore(1, 0x...bEEF)` staticcall reverts with panic `0x51` (`called an invalid internal function`). Thus no unauthorized mutation attempt or differential was measured. Do not call this rejected or a vulnerability; the evidence supports moving the case from hypothesis-conversion ambiguity to an observer/deployment preconditions capability gap.
 - Next: add a fail-closed preconditions probe in `blind_authorization.py` that checks observer readability and resolves a source-verified authorized caller (nonzero, role/owner confirmed from source, distinct from attacker); emit a clean `UNMEASURABLE` result before the differential test if any precondition fails. Then update the corpus `failure_layer: preconditions` with evidence and move to the next supported-class target.
+
+## Next action — 2026-10-17
+- [ ] DcntEth rerun on the pnpm-enabled campaign workflow → inspect verdict and causal verification.
+- [ ] If supported and causally verified: freeze the harness and select five narrow-profile targets.
+- [ ] If failed: diagnose the specific failure layer; do not add new targets or expand the harness.
