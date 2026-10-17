@@ -136,7 +136,16 @@ The parser now models direct writes, same-contract helper-mediated writes, payab
 - No finding, security pass, or authorization-bypass reproduction is claimed.
 
 ## Open actions
-- Trace panic 0x51 in run 39048742571's generated test (artifact: generated-tests/H-AUTH-addValidator.t.sol)
+- [x] Trace panic 0x51: run 39063637931, job 117486693810, executed SHA `112d50a94e3ee34d33a09c56e0d8f51bff0d7c33`. `-vvvv` confirms `setUp()` deploys `AgentNftV2`, then the first `target.validatorScore(1, 0x...bEEF)` staticcall panics 0x51 before `addValidator` is called. This is a precondition/observer failure, not an authorization result.
 - Then: preconditions probe in blind_authorization.py
 - Then: score Virtuals at failure_layer:preconditions
 - Then: pick next supported-class target
+
+
+## Virtuals precondition trace — 2026-10-17
+- Run: https://github.com/Wonderadroit/Cydra_web3/actions/runs/39063637931
+- Job: https://github.com/Wonderadroit/Cydra_web3/actions/runs/39063637931/job/117486693810
+- Artifact: https://github.com/Wonderadroit/Cydra_web3/actions/runs/39063637931/artifacts/12111519278
+- Executed CYDRA SHA: `112d50a94e3ee34d33a09c56e0d8f51bff0d7c33`; direct-solc ancestry preflight passed and Python regression passed.
+- Foundry trace: deployment succeeds and emits `Initialized(version: 18446744073709551615)`. Before calling `addValidator`, the first `validatorScore(1, 0x...bEEF)` staticcall reverts with panic `0x51` (`called an invalid internal function`). Thus no unauthorized mutation attempt or differential was measured. Do not call this rejected or a vulnerability; the evidence supports moving the case from hypothesis-conversion ambiguity to an observer/deployment preconditions capability gap.
+- Next: add a fail-closed preconditions probe in `blind_authorization.py` that checks observer readability and resolves a source-verified authorized caller (nonzero, role/owner confirmed from source, distinct from attacker); emit a clean `UNMEASURABLE` result before the differential test if any precondition fails. Then update the corpus `failure_layer: preconditions` with evidence and move to the next supported-class target.
