@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .ast_dataflow import SemanticRelationshipEvidence, extract_ast_relationships
+from .ast_dataflow import SemanticRelationshipEvidence, extract_compilation_relationships
 from .compiler_constraints import ConstraintEvidence, collect_ast_declarations, extract_parameter_constraints
 
 
@@ -32,6 +32,8 @@ class CompilerEvidenceResult:
     source_ast_found: bool = False
     source_dependency_count: int = 0
     unresolved_imports: tuple[str, ...] = ()
+    closure_status: str = "complete"
+    source_closure: tuple[tuple[str, str], ...] = ()
 
 
 def _source_keys(payload: dict[str, Any], source: Path, project: Path) -> tuple[tuple[str, dict[str, Any]], ...]:
@@ -157,6 +159,23 @@ def _source_dependency_closure(
     return closure, tuple(sorted(unresolved))
 
 
+def _disk_paths_for_source_keys(project: Path, source_keys: set[str]) -> tuple[tuple[str, str], ...]:
+    """Bind compiler source-unit keys to existing files in the checked-out project."""
+    project = project.resolve()
+    remappings = _project_remappings(project)
+    output: list[tuple[str, str]] = []
+    for key in sorted(source_keys):
+        normalized = key.replace(chr(92), "/")
+        candidates = [project / normalized, project / "node_modules" / normalized]
+        for prefix, target in remappings:
+            if normalized.startswith(prefix):
+                candidates.append(project / target / normalized[len(prefix):])
+        disk_path = next((candidate.resolve() for candidate in candidates if candidate.is_file()), None)
+        if disk_path is not None:
+            output.append((key, str(disk_path)))
+    return tuple(output)
+
+
 def _source_asts(payload: dict[str, Any], source_allowlist: set[str] | None = None) -> tuple[tuple[str, dict[str, Any]], ...]:
     """Return every compiler AST in this build unit, including imported base contracts.
 
@@ -182,9 +201,8 @@ def extract_state_effects_from_build_info(
     build_info: Path, source: Path, project: Path, source_allowlist: set[str] | None = None
 ) -> tuple[SemanticRelationshipEvidence, ...]:
     payload = json.loads(build_info.read_text(encoding="utf-8"))
-    evidence: list[SemanticRelationshipEvidence] = []
-    for source_key, ast in _source_asts(payload, source_allowlist):
-        evidence.extend(extract_ast_relationships(ast, source_key))
+    source_asts = list(_source_asts(payload, source_allowlist))
+    evidence = list(extract_compilation_relationships(source_asts))
     # A project can emit multiple build-info records that repeat imported sources.
     unique: dict[tuple[Any, ...], SemanticRelationshipEvidence] = {}
     for item in evidence:
@@ -362,7 +380,8 @@ def compile_state_effects(project: str | Path, source: str | Path) -> CompilerEv
     if not project_path.exists() or not source_path.exists():
         return CompilerEvidenceResult((), (), False, "input_missing", command, "", "project or source missing")
     if not (project_path / "foundry.toml").is_file() and _is_hardhat_project(project_path):
-        return _compile_hardhat_state_effects(project_path, source_path)
+        from .compiler_hardhat_direct import compile_hardhat_direct
+        return compile_hardhat_direct(project_path, source_path)
 
     with tempfile.TemporaryDirectory(prefix="cydra-build-info-", dir=project_path.parent) as temp:
         info_path = Path(temp)
@@ -432,4 +451,5 @@ def compile_state_effects(project: str | Path, source: str | Path) -> CompilerEv
             completed.stdout, completed.stderr, tuple(map(str, build_files)),
             tuple(sorted(versions)), len(build_files), matched_source_count,
             source_ast_found, len(dependency_sources), tuple(sorted(unresolved_imports)),
+            source_closure=_disk_paths_for_source_keys(project_path, dependency_sources),
         )

@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import re
 import shutil
+import sys
 
 from cydra.authorization_runtime import classify_authorization_blind_execution
 from cydra.blind_authorization import generate_blind_authorization_test_from_experiment
@@ -22,6 +23,26 @@ from cydra.reasoning import (
 )
 
 _IMPORT_RE = re.compile(r'''\bimport\s+(?:[^\"']+\s+from\s+)?[\"']([^\"']+)[\"']\s*;''')
+
+def _persist_campaign_evidence(output: Path | None, payload, generated, failure_reason=None) -> None:
+    """Persist campaign evidence independently of the campaign's exit status."""
+    if output is None:
+        return
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if payload is None:
+        payload = {
+            "classification": "RUNNER_ABORTED",
+            "finding_gate": "NOT_READY",
+            "failure_reason": failure_reason or "campaign exited before producing a result payload",
+        }
+    output.write_text(json.dumps(_json(payload), indent=2) + "\n", encoding="utf-8")
+    if generated is not None and Path(generated).is_file():
+        generated_dir = output.parent / "generated-tests"
+        generated_dir.mkdir(parents=True, exist_ok=True)
+        destination = generated_dir / Path(generated).name
+        if Path(generated).resolve() != destination.resolve():
+            shutil.copy2(generated, destination)
+
 
 def _seed_coverage_allows_measurement(hypotheses, seeds) -> bool:
     """Seed coverage is a successful measurement, never finding readiness."""
@@ -230,94 +251,72 @@ def _materialize_target_dependencies(project: Path) -> dict:
 
 
 
-def _prepare_isolated_foundry_project(target_root: Path, source: Path, destination: Path) -> Path:
-    """Copy only the target's local Solidity import closure into a clean Foundry root."""
-    source_root = next(
-        (
-            candidate
-            for candidate in (source.parents)
-            if candidate.name in {"src", "contracts"}
-        ),
-        target_root,
-    )
+def _prepare_isolated_foundry_project(
+    target_root: Path,
+    closure: dict[str, Path],
+    destination: Path,
+    *,
+    required_keys: tuple[str, ...] = (),
+) -> Path:
+    """Stage the compiler-resolved source closure without resolving imports again."""
+    missing = [key for key in required_keys if key not in closure]
+    if missing:
+        raise RuntimeError(f"missing_from_closure:{missing[0]}")
+
     src_root = destination / "src"
-    src_root.mkdir(parents=True, exist_ok=True)
     test_root = destination / "test" / "generated"
     test_root.mkdir(parents=True, exist_ok=True)
 
-    pending = [source]
-    copied: set[Path] = set()
-    while pending:
-        current = pending.pop()
-        try:
-            relative = current.relative_to(source_root)
-            destination_file = src_root / relative
-        except ValueError:
-            relative = current.relative_to(target_root)
-            # npm packages must remain at the isolated Foundry root because
-            # remappings such as @openzeppelin/=node_modules/@openzeppelin/
-            # resolve from there. Other dependency trees are staged under src/.
-            if relative.parts and relative.parts[0] == "node_modules":
-                destination_file = destination / relative
-            else:
-                destination_file = src_root / relative
-        if current in copied:
-            continue
-        copied.add(current)
+    staged_keys: set[str] = set()
+    for key, disk_path in closure.items():
+        source_path = Path(disk_path)
+        if not source_path.is_file():
+            raise RuntimeError(f"missing_from_closure:{key}")
+        destination_file = destination / Path(key)
         destination_file.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(current, destination_file)
+        shutil.copy2(source_path, destination_file)
+        staged_keys.add(Path(key).as_posix())
 
-        text = current.read_text(encoding="utf-8")
-        remappings = []
-        remappings_file = target_root / "remappings.txt"
-        if remappings_file.exists():
-            for line in remappings_file.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                prefix, destination_path = line.split("=", 1)
-                remappings.append((prefix, destination_path))
-        for imported in _IMPORT_RE.findall(text):
-            if imported.startswith("."):
-                dependency = (current.parent / imported).resolve()
-            elif imported.startswith("contracts/"):
-                dependency = (target_root / imported).resolve()
-            else:
-                dependency = None
-                for prefix, destination_path in sorted(remappings, key=lambda item: len(item[0]), reverse=True):
-                    if imported.startswith(prefix):
-                        suffix = imported[len(prefix):]
-                        dependency = (target_root / destination_path / suffix).resolve()
-                        break
-                if dependency is None:
-                    continue
-            if dependency.is_file() and dependency not in copied:
-                pending.append(dependency)
+    # Preserve project remappings only when their target is represented in the
+    # compiler closure. Since closure keys are copied verbatim, destinations
+    # point to the same paths inside the isolated project.
+    remappings: list[str] = []
+    # Every compiler source-unit key is staged verbatim. Derive identity mappings
+    # from those keys so package-shaped imports remain addressable without
+    # inventing a second filesystem resolver.
+    for key in sorted(staged_keys):
+        parts = Path(key).parts
+        if not parts:
+            continue
+        root = f"{parts[0]}/{parts[1]}/" if parts[0].startswith("@") and len(parts) > 1 else f"{parts[0]}/"
+        if any(item.startswith(root) for item in staged_keys):
+            remappings.append(f"{root}={root}")
 
-    remapping_lines = []
-    for prefix, destination_path in remappings:
-        # npm remapping destinations already include their root prefix. Do not
-        # prepend node_modules again; doing so creates node_modules/node_modules/...
-        # Non-npm dependencies copied into src/ need that staging prefix.
-        if destination_path.startswith("node_modules/"):
-            remapping_lines.append(f"{prefix}={destination_path}")
-        else:
-            remapping_lines.append(f"{prefix}=src/{destination_path}")
-    remapping_literal = ", ".join(repr(item) for item in remapping_lines)
+    remappings_file = target_root / "remappings.txt"
+    if remappings_file.is_file():
+        for raw in remappings_file.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            prefix, target = line.split("=", 1)
+            target = target.strip().rstrip("/")
+            if any(key == target or key.startswith(target + "/") for key in staged_keys):
+                remappings.append(f"{prefix}={target}/")
+            elif any(key == prefix.rstrip("/") or key.startswith(prefix) for key in staged_keys):
+                remappings.append(f"{prefix}={prefix}")
+
+    remapping_literal = ", ".join(repr(item) for item in sorted(set(remappings)))
     (destination / "foundry.toml").write_text(
         '[profile.default]\n'
-        'src = "src"\n'
+        'src = "."\n'
         'test = "test"\n'
         'libs = ["lib"]\n'
         'auto_detect_solc = true\n'
         f"remappings = [{remapping_literal}]\n",
         encoding="utf-8",
     )
-    hardhat_console = destination / "lib" / "hardhat" / "console.sol"
-    hardhat_console.parent.mkdir(parents=True, exist_ok=True)
-    hardhat_console.write_text("pragma solidity ^0.6.12; library console {}\n", encoding="utf-8")
     (destination / "remappings.txt").write_text(
-        "\n".join(remapping_lines) + "\n",
+        "\n".join(sorted(set(remappings))) + ("\n" if remappings else ""),
         encoding="utf-8",
     )
     return test_root
@@ -417,10 +416,33 @@ def _patched_auth_test(generated,destination):
     destination.write_text(patched,encoding="utf-8")
 
 def _json(v):
-    if hasattr(v,"__dict__"): return {k:_json(x) for k,x in v.__dict__.items()}
-    if isinstance(v,(tuple,list)): return [_json(x) for x in v]
-    if isinstance(v,dict): return {str(k):_json(x) for k,x in v.items()}
+    if hasattr(v,"__dict__"):
+        data = {k: _json(x) for k, x in v.__dict__.items()}
+        if v.__class__.__name__ == "Hypothesis" and getattr(v, "invariant_id", None) == "INV-AUTH-001":
+            data["hypothesis_class"] = "unguarded_setter"
+        return data
+    if isinstance(v, (tuple, list)): return [_json(x) for x in v]
+    if isinstance(v, dict): return {str(k): _json(x) for k, x in v.items()}
     return v
+
+
+def _compiler_summary(compiler):
+    """Serialize compiler readiness and evidence consistently on every campaign exit path."""
+    evidence = getattr(compiler, "evidence", ())
+    constraints = getattr(compiler, "constraints", ())
+    return {
+        "executed": getattr(compiler, "executed", False),
+        "status": getattr(compiler, "status", "unknown"),
+        "versions": list(getattr(compiler, "compiler_versions", ())),
+        "build_info_count": getattr(compiler, "build_info_count", 0),
+        "matched_source_count": getattr(compiler, "matched_source_count", 0),
+        "source_ast_found": getattr(compiler, "source_ast_found", False),
+        "source_dependency_count": getattr(compiler, "source_dependency_count", 0),
+        "unresolved_imports": list(getattr(compiler, "unresolved_imports", ())),
+        "source_closure_status": getattr(compiler, "closure_status", "complete"),
+        "semantic_relationship_count": len(evidence),
+        "parameter_constraint_count": len(constraints),
+    }
 
 
 def _no_hypothesis_payload(target, compiler, result, related_intent_parity_hypotheses=()):
@@ -481,18 +503,7 @@ def _no_hypothesis_payload(target, compiler, result, related_intent_parity_hypot
             })
     return {
         "target": target,
-        "compiler": {
-            "executed": compiler.executed,
-            "status": compiler.status,
-            "versions": list(compiler.compiler_versions),
-            "build_info_count": compiler.build_info_count,
-            "matched_source_count": compiler.matched_source_count,
-            "source_ast_found": compiler.source_ast_found,
-            "source_dependency_count": compiler.source_dependency_count,
-            "unresolved_imports": list(compiler.unresolved_imports),
-            "semantic_relationship_count": len(compiler.evidence),
-            "parameter_constraint_count": len(compiler.constraints),
-        },
+        "compiler": _compiler_summary(compiler),
         "lifecycle_surfaces": lifecycle_surfaces,
         "contracts": [
             {
@@ -597,237 +608,267 @@ def main() -> int:
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[1]
-    with tempfile.TemporaryDirectory(prefix="cydra-blind-auth-") as temp:
-        checkout = Path(temp) / "target"
-        subprocess.run(("git", "clone", "--no-tags", "--recurse-submodules", args.target_repo, str(checkout)), check=True)
-        subprocess.run(("git", "-C", str(checkout), "fetch", "--no-tags", "origin", args.target_ref), check=True)
-        subprocess.run(("git", "-C", str(checkout), "checkout", "--detach", args.target_ref), check=True)
-        project = checkout / args.target_project
-        source = checkout / args.target_path
-        for supplemental in args.supplemental_file:
-            try:
-                relative_path, supplemental_ref = supplemental.rsplit("@", 1)
-            except ValueError as exc:
-                raise SystemExit(f"Invalid supplemental file {supplemental!r}; expected path@ref") from exc
-            blob = subprocess.run(
-                ("git", "-C", str(checkout), "show", f"{supplemental_ref}:{relative_path}"),
-                text=True,
-                capture_output=True,
-                check=True,
-            ).stdout
-            destination = checkout / relative_path
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_text(blob, encoding="utf-8")
-        dependency_materialization = _materialize_target_dependencies(project)
-        print(
-            "DEPENDENCY_MATERIALIZATION",
-            dependency_materialization.get("status"),
-            "manager=",
-            dependency_materialization.get("package_manager"),
-            "lockfile=",
-            dependency_materialization.get("lockfile"),
-            "confidence=",
-            dependency_materialization.get("confidence"),
-        )
-        compiler = compile_state_effects(project, source)
-        result = investigate_authorization(
-            source,
-            target=f"{args.target_repo}@{args.target_ref}",
-            semantic_evidence=compiler.evidence,
-        )
-        hypotheses = [h for h in result.hypotheses if h.invariant_id == "INV-AUTH-001"]
-        related_intent_parity_hypotheses = [
-            h for h in result.hypotheses
-            if h.invariant_id.startswith("INV-INTENT-PARITY-")
-        ]
-        if not hypotheses:
-            print("NO_AUTH_HYPOTHESIS")
-            for contract in result.contracts:
-                print("CONTRACT", contract.name, "functions=", len(contract.functions))
-                for function in contract.functions:
-                    print("FUNCTION", function.name, "visibility=", function.visibility, "modifiers=", function.modifiers, "writes=", function.writes)
-            print("INVARIANTS", [item.__dict__ for item in result.invariants])
-            payload = _no_hypothesis_payload(
-                f"{args.target_repo}@{args.target_ref}:{args.target_path}",
-                compiler,
-                result,
-                related_intent_parity_hypotheses=related_intent_parity_hypotheses,
+    payload = None
+    generated = None
+    generated_artifact = None
+    try:
+        with tempfile.TemporaryDirectory(prefix="cydra-blind-auth-") as temp:
+            checkout = Path(temp) / "target"
+            subprocess.run(("git", "clone", "--no-tags", "--recurse-submodules", args.target_repo, str(checkout)), check=True)
+            subprocess.run(("git", "-C", str(checkout), "fetch", "--no-tags", "origin", args.target_ref), check=True)
+            subprocess.run(("git", "-C", str(checkout), "checkout", "--detach", args.target_ref), check=True)
+            project = checkout / args.target_project
+            source = checkout / args.target_path
+            for supplemental in args.supplemental_file:
+                try:
+                    relative_path, supplemental_ref = supplemental.rsplit("@", 1)
+                except ValueError as exc:
+                    raise SystemExit(f"Invalid supplemental file {supplemental!r}; expected path@ref") from exc
+                blob = subprocess.run(
+                    ("git", "-C", str(checkout), "show", f"{supplemental_ref}:{relative_path}"),
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                ).stdout
+                destination = checkout / relative_path
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text(blob, encoding="utf-8")
+            dependency_materialization = _materialize_target_dependencies(project)
+            print(
+                "DEPENDENCY_MATERIALIZATION",
+                dependency_materialization.get("status"),
+                "manager=",
+                dependency_materialization.get("package_manager"),
+                "lockfile=",
+                dependency_materialization.get("lockfile"),
+                "confidence=",
+                dependency_materialization.get("confidence"),
             )
-            payload["dependency_materialization"] = dependency_materialization
-            if args.output:
-                args.output.parent.mkdir(parents=True, exist_ok=True)
-                args.output.write_text(json.dumps(_json(payload), indent=2) + "\n", encoding="utf-8")
-            print("DISPOSITION", payload["disposition"], "finding_gate=", payload["finding_gate"])
-            if _seed_coverage_allows_measurement(hypotheses, result.seeds):
-                payload["measurement_status"] = "SEEDS_READY_NO_AUTH_HYPOTHESIS"
-                payload["seed_count"] = len(result.seeds)
-                payload["finding_gate"] = "NOT_READY"
+            compiler = compile_state_effects(project, source)
+            result = investigate_authorization(
+                source,
+                target=f"{args.target_repo}@{args.target_ref}",
+                semantic_evidence=compiler.evidence,
+            )
+            hypotheses = [h for h in result.hypotheses if h.invariant_id == "INV-AUTH-001"]
+            related_intent_parity_hypotheses = [
+                h for h in result.hypotheses
+                if h.invariant_id.startswith("INV-INTENT-PARITY-")
+            ]
+            if not hypotheses:
+                print("NO_AUTH_HYPOTHESIS")
+                for contract in result.contracts:
+                    print("CONTRACT", contract.name, "functions=", len(contract.functions))
+                    for function in contract.functions:
+                        print("FUNCTION", function.name, "visibility=", function.visibility, "modifiers=", function.modifiers, "writes=", function.writes)
+                print("INVARIANTS", [item.__dict__ for item in result.invariants])
+                payload = _no_hypothesis_payload(
+                    f"{args.target_repo}@{args.target_ref}:{args.target_path}",
+                    compiler,
+                    result,
+                    related_intent_parity_hypotheses=related_intent_parity_hypotheses,
+                )
+                payload["dependency_materialization"] = dependency_materialization
                 if args.output:
                     args.output.parent.mkdir(parents=True, exist_ok=True)
                     args.output.write_text(json.dumps(_json(payload), indent=2) + "\n", encoding="utf-8")
-                print("SEED_COVERAGE", len(result.seeds), "measurement=PASS", "finding_gate=NOT_READY")
-                return 0
-            if args.allow_no_hypothesis:
-                return 0
-            raise SystemExit("blind authorization backtest produced no authorization hypothesis or measurable seed coverage")
+                print("DISPOSITION", payload["disposition"], "finding_gate=", payload["finding_gate"])
+                if _seed_coverage_allows_measurement(hypotheses, result.seeds):
+                    payload["measurement_status"] = "SEEDS_READY_NO_AUTH_HYPOTHESIS"
+                    payload["seed_count"] = len(result.seeds)
+                    payload["finding_gate"] = "NOT_READY"
+                    if args.output:
+                        args.output.parent.mkdir(parents=True, exist_ok=True)
+                        args.output.write_text(json.dumps(_json(payload), indent=2) + "\n", encoding="utf-8")
+                    print("SEED_COVERAGE", len(result.seeds), "measurement=PASS", "finding_gate=NOT_READY")
+                    return 0
+                if args.allow_no_hypothesis:
+                    return 0
+                raise SystemExit("blind authorization backtest produced no authorization hypothesis or measurable seed coverage")
 
-        if dependency_materialization.get("status") == "BLOCKED":
-            hypothesis = hypotheses[0] if hypotheses else None
-            experiment = next(
-                (e for e in result.experiments if hypothesis and e.hypothesis_id == hypothesis.hypothesis_id),
-                None,
-            )
-            execution = ExecutionResult(
-                experiment_id=experiment.experiment_id if experiment else "dependency-materialization",
-                target=str(source),
-                command=tuple(dependency_materialization.get("command") or ()),
-                exit_code=2,
-                executed=False,
-                tests_run=0,
-                tests_failed=0,
-                status="UNMEASURABLE",
-                stdout=dependency_materialization.get("stdout", ""),
-                stderr=dependency_materialization.get("detail", "Target dependencies could not be materialized."),
-            )
-            payload = {
-                "target": f"{args.target_repo}@{args.target_ref}:{args.target_path}",
-                "hypothesis_seeds": _json(getattr(result, "seeds", ())),
-                "hypothesis": _json(hypothesis) if hypothesis else None,
-                "experiment": _json(experiment) if experiment else None,
-                "dependency_materialization": dependency_materialization,
-                "blind_execution": _json(execution),
-                "classification": "UNMEASURABLE",
-                "finding_gate": "NOT_READY",
-            }
-            if args.output:
-                args.output.parent.mkdir(parents=True, exist_ok=True)
-                args.output.write_text(json.dumps(_json(payload), indent=2) + "\n", encoding="utf-8")
-            print("EXECUTION_STATUS UNMEASURABLE reason=dependency_materialization_blocked")
-            return 2
-
-        execution_project = Path(temp) / "execution-project"
-        _prepare_isolated_foundry_project(checkout, source, execution_project)
-
-        source_root = next(
-            (
-                candidate
-                for candidate in source.parents
-                if candidate.name in {"src", "contracts"}
-            ),
-            project,
-        )
-        source_relative = Path(source).relative_to(source_root)
-        for hypothesis in hypotheses:
-            experiment = next(e for e in result.experiments if e.hypothesis_id == hypothesis.hypothesis_id)
-            contract = next(
-                c for c in result.contracts
-                if any(f.name == hypothesis.target_function for f in c.functions)
-            )
-            # The blind harness now deploys the modeled contract directly.
-            # Avoid a separate forge-inspect preflight: Foundry's generated
-            # constructor helper can fail before the actual experiment even
-            # when the typed deployment is valid. Execution itself remains the
-            # authoritative compilation/execution measurement.
-            creation_bytecode = None
-            output = test_path_for(execution_project, f"generated/{hypothesis.hypothesis_id}.t.sol")
-            try:
-                generated = generate_blind_authorization_test_from_experiment(
-                    hypothesis,
-                    experiment,
-                    os.path.relpath(
-                        execution_project / "src" / Path(contract.source).relative_to(source_root),
-                        output.parent,
-                    ).replace(os.sep, "/"),
-                    contract.name,
-                    output,
-                    contract,
+            if dependency_materialization.get("status") == "BLOCKED":
+                hypothesis = hypotheses[0] if hypotheses else None
+                experiment = next(
+                    (e for e in result.experiments if hypothesis and e.hypothesis_id == hypothesis.hypothesis_id),
+                    None,
                 )
-            except ValueError as exc:
-                # A missing constructor type is a modeling/execution-precondition
-                # gap, not evidence about the target. Preserve it explicitly as
-                # UNMEASURABLE instead of fabricating an ABI value or crashing the
-                # benchmark before an evidence artifact can be written.
                 execution = ExecutionResult(
-                    experiment_id=experiment.experiment_id,
+                    experiment_id=experiment.experiment_id if experiment else "dependency-materialization",
                     target=str(source),
-                    command=("cydra", "render_authorization_test"),
+                    command=tuple(dependency_materialization.get("command") or ()),
                     exit_code=2,
                     executed=False,
                     tests_run=0,
                     tests_failed=0,
                     status="UNMEASURABLE",
-                    stdout="",
-                    stderr=f"authorization experiment could not be rendered faithfully: {exc}",
+                    stdout=dependency_materialization.get("stdout", ""),
+                    stderr=dependency_materialization.get("detail", "Target dependencies could not be materialized."),
                 )
-                print("EXECUTION_STATUS", execution.status, "reason=", execution.stderr)
-                outcome = classify_authorization_blind_execution(hypothesis, execution)
                 payload = {
                     "target": f"{args.target_repo}@{args.target_ref}:{args.target_path}",
+                    "compiler": _compiler_summary(compiler),
                     "hypothesis_seeds": _json(getattr(result, "seeds", ())),
-                    "hypothesis": _json(hypothesis),
-                    "experiment": _json(experiment),
+                    "hypothesis": _json(hypothesis) if hypothesis else None,
+                    "experiment": _json(experiment) if experiment else None,
                     "dependency_materialization": dependency_materialization,
                     "blind_execution": _json(execution),
-                    "classification": outcome.benchmark_status,
+                    "classification": "UNMEASURABLE",
                     "finding_gate": "NOT_READY",
                 }
                 if args.output:
                     args.output.parent.mkdir(parents=True, exist_ok=True)
-                    args.output.write_text(
-                        json.dumps(_json(payload), indent=2) + "\n",
-                        encoding="utf-8",
+                    args.output.write_text(json.dumps(_json(payload), indent=2) + "\n", encoding="utf-8")
+                print("EXECUTION_STATUS UNMEASURABLE reason=dependency_materialization_blocked")
+                return 2
+
+            execution_project = Path(temp) / "execution-project"
+            closure = {key: Path(disk_path) for key, disk_path in compiler.source_closure}
+            source_key = next(
+                (key for key, disk_path in closure.items() if disk_path.resolve() == source.resolve()),
+                None,
+            )
+            if source_key is None:
+                raise RuntimeError(f"missing_from_closure:{source.relative_to(project).as_posix()}")
+            _prepare_isolated_foundry_project(
+                checkout, closure, execution_project, required_keys=(source_key,)
+            )
+
+            source_relative = Path(source_key)
+            for hypothesis in hypotheses:
+                experiment = next(e for e in result.experiments if e.hypothesis_id == hypothesis.hypothesis_id)
+                contract = next(
+                    c for c in result.contracts
+                    if any(f.name == hypothesis.target_function for f in c.functions)
+                )
+                # The blind harness now deploys the modeled contract directly.
+                # Avoid a separate forge-inspect preflight: Foundry's generated
+                # constructor helper can fail before the actual experiment even
+                # when the typed deployment is valid. Execution itself remains the
+                # authoritative compilation/execution measurement.
+                creation_bytecode = None
+                output = test_path_for(execution_project, f"generated/{hypothesis.hypothesis_id}.t.sol")
+                try:
+                    generated = generate_blind_authorization_test_from_experiment(
+                        hypothesis,
+                        experiment,
+                        os.path.relpath(
+                            execution_project / source_relative,
+                            output.parent,
+                        ).replace(os.sep, "/"),
+                        contract.name,
+                        output,
+                        contract,
                     )
+                    if args.output and generated is not None and Path(generated).is_file():
+                        generated_dir = args.output.parent / "generated-tests"
+                        generated_dir.mkdir(parents=True, exist_ok=True)
+                        generated_artifact = generated_dir / Path(generated).name
+                        shutil.copy2(generated, generated_artifact)
+                except ValueError as exc:
+                    # A missing constructor type is a modeling/execution-precondition
+                    # gap, not evidence about the target. Preserve it explicitly as
+                    # UNMEASURABLE instead of fabricating an ABI value or crashing the
+                    # benchmark before an evidence artifact can be written.
+                    execution = ExecutionResult(
+                        experiment_id=experiment.experiment_id,
+                        target=str(source),
+                        command=("cydra", "render_authorization_test"),
+                        exit_code=2,
+                        executed=False,
+                        tests_run=0,
+                        tests_failed=0,
+                        status="UNMEASURABLE",
+                        stdout="",
+                        stderr=f"authorization experiment could not be rendered faithfully: {exc}",
+                    )
+                    print("EXECUTION_STATUS", execution.status, "reason=", execution.stderr)
+                    outcome = classify_authorization_blind_execution(hypothesis, execution)
+                    payload = {
+                        "target": f"{args.target_repo}@{args.target_ref}:{args.target_path}",
+                        "compiler": _compiler_summary(compiler),
+                        "hypothesis_seeds": _json(getattr(result, "seeds", ())),
+                        "hypothesis": _json(hypothesis),
+                        "experiment": _json(experiment),
+                        "dependency_materialization": dependency_materialization,
+                        "blind_execution": _json(execution),
+                        "classification": outcome.benchmark_status,
+                        "measurement_verdict": outcome.measurement_verdict,
+                        "finding_gate": "NOT_READY",
+                    }
+                    if args.output:
+                        args.output.parent.mkdir(parents=True, exist_ok=True)
+                        args.output.write_text(
+                            json.dumps(_json(payload), indent=2) + "\n",
+                            encoding="utf-8",
+                        )
+                    print(
+                        f"{hypothesis.hypothesis_id}: status={execution.status} "
+                        f"classification={outcome.benchmark_status} evidence={outcome.evidence.evidence_id}"
+                    )
+                    return 2
+                execution = run_foundry_test(execution_project, generated, experiment.experiment_id, "blind")
+                print("EXECUTION_STATUS", execution.status, "exit=", execution.exit_code, "tests=", execution.tests_run, "failed=", execution.tests_failed)
+                print(execution.stdout)
+                print(execution.stderr)
+                # UNMEASURABLE is a legitimate measurement outcome; preserve it
+                # instead of converting a compiler/precondition gap into a runner crash.
+                outcome = classify_authorization_blind_execution(hypothesis, execution)
                 print(
                     f"{hypothesis.hypothesis_id}: status={execution.status} "
                     f"classification={outcome.benchmark_status} evidence={outcome.evidence.evidence_id}"
                 )
-                return 2
-            execution = run_foundry_test(execution_project, generated, experiment.experiment_id, "blind")
-            print("EXECUTION_STATUS", execution.status, "exit=", execution.exit_code, "tests=", execution.tests_run, "failed=", execution.tests_failed)
-            print(execution.stdout)
-            print(execution.stderr)
-            # UNMEASURABLE is a legitimate measurement outcome; preserve it
-            # instead of converting a compiler/precondition gap into a runner crash.
-            outcome = classify_authorization_blind_execution(hypothesis, execution)
-            print(
-                f"{hypothesis.hypothesis_id}: status={execution.status} "
-                f"classification={outcome.benchmark_status} evidence={outcome.evidence.evidence_id}"
-            )
-            if outcome.benchmark_status != args.expected_status:
-                return 2
-            payload={"target":f"{args.target_repo}@{args.target_ref}:{args.target_path}","hypothesis_seeds":_json(getattr(result, "seeds", ())),"hypothesis":_json(hypothesis),"experiment":_json(experiment),"dependency_materialization":dependency_materialization,"blind_execution":_json(execution),"classification":outcome.benchmark_status,"finding_gate":"CONFIRMED_ONLY"}
-            if args.require_ready and outcome.benchmark_status=="confirmed":
-                isolated_source = execution_project / "src" / source_relative
-                auth_context = "\n".join(
-                    path.read_text(encoding="utf-8")
-                    for path in sorted((execution_project / "src").rglob("*.sol"))
-                )
-                modifier = _auth_modifier(auth_context)
-                print("AUTHORIZATION_CONTROL", modifier)
-                if modifier is None: print("AUTHORIZATION_CAUSAL_CONTROL_UNAVAILABLE"); return 3
-                original=_apply_auth_control(isolated_source,hypothesis.target_function,modifier)
-                try:
-                    patched_test=generated.with_name(generated.stem+"-patched.t.sol"); _patched_auth_test(generated,patched_test)
-                    patched=run_foundry_test(execution_project,patched_test,hypothesis.hypothesis_id+":patched","patched")
-                finally: isolated_source.write_text(original,encoding="utf-8")
-                causal=execution.status=="FAIL" and patched.status=="PASS"
-                reproduction=run_foundry_test(execution_project,generated,hypothesis.hypothesis_id+":reproduction","reproduction")
-                original=_apply_auth_control(isolated_source,hypothesis.target_function,modifier)
-                try:
-                    repro_test=generated.with_name(generated.stem+"-reproduction-patched.t.sol"); _patched_auth_test(generated,repro_test)
-                    repro_patched=run_foundry_test(execution_project,repro_test,hypothesis.hypothesis_id+":reproduction-patched","reproduction-patched")
-                finally: isolated_source.write_text(original,encoding="utf-8")
-                repro= reproduction.status=="FAIL" and repro_patched.status=="PASS"
-                print("PATCHED_EXECUTION_STATUS", patched.status, "CAUSAL_VERIFICATION", causal)
-                print("REPRODUCTION_EXECUTION_STATUS", reproduction.status, "REPRODUCTION_PATCHED_EXECUTION_STATUS", repro_patched.status, "REPRODUCTION_VERIFICATION", repro)
-                payload.update({"authorization_control":modifier,"patched_execution":_json(patched),"causal_verification":{"state":"verified" if causal else "not_verified","chain_id":"causal:authorization-modifier-differential"},"reproduction_execution":_json(reproduction),"reproduction_patched_execution":_json(repro_patched),"reproduction_verification":{"state":"verified" if repro else "not_verified","chain_id":"reproduction:authorization-modifier-differential"},"finding_gate":"READY" if causal and repro and compiler.status != "source_dependency_closure_incomplete" else "NOT_READY"})
+                payload={"target":f"{args.target_repo}@{args.target_ref}:{args.target_path}","compiler":_compiler_summary(compiler),"hypothesis_seeds":_json(getattr(result, "seeds", ())),"hypothesis":_json(hypothesis),"hypothesis_class":"unguarded_setter","experiment":_json(experiment),"dependency_materialization":dependency_materialization,"blind_execution":_json(execution),"classification":outcome.benchmark_status,"measurement_verdict":outcome.measurement_verdict,"finding_gate":"CONFIRMED_ONLY"}
+                if generated is not None:
+                    payload["generated_test_path"] = str(generated)
+                if outcome.benchmark_status != args.expected_status:
+                    payload["exit_reason"] = "expected_outcome_mismatch"
+                    return 2
+                if args.require_ready and outcome.benchmark_status=="confirmed":
+                    isolated_source = execution_project / source_relative
+                    auth_context = "\n".join(
+                        path.read_text(encoding="utf-8")
+                        for path in sorted(execution_project.rglob("*.sol")) if path.is_file() and "test" not in path.relative_to(execution_project).parts
+                    )
+                    modifier = _auth_modifier(auth_context)
+                    print("AUTHORIZATION_CONTROL", modifier)
+                    if modifier is None: print("AUTHORIZATION_CAUSAL_CONTROL_UNAVAILABLE"); return 3
+                    original=_apply_auth_control(isolated_source,hypothesis.target_function,modifier)
+                    try:
+                        patched_test=generated.with_name(generated.stem+"-patched.t.sol"); _patched_auth_test(generated,patched_test)
+                        patched=run_foundry_test(execution_project,patched_test,hypothesis.hypothesis_id+":patched","patched")
+                    finally: isolated_source.write_text(original,encoding="utf-8")
+                    causal=execution.status=="FAIL" and patched.status=="PASS"
+                    reproduction=run_foundry_test(execution_project,generated,hypothesis.hypothesis_id+":reproduction","reproduction")
+                    original=_apply_auth_control(isolated_source,hypothesis.target_function,modifier)
+                    try:
+                        repro_test=generated.with_name(generated.stem+"-reproduction-patched.t.sol"); _patched_auth_test(generated,repro_test)
+                        repro_patched=run_foundry_test(execution_project,repro_test,hypothesis.hypothesis_id+":reproduction-patched","reproduction-patched")
+                    finally: isolated_source.write_text(original,encoding="utf-8")
+                    repro= reproduction.status=="FAIL" and repro_patched.status=="PASS"
+                    print("PATCHED_EXECUTION_STATUS", patched.status, "CAUSAL_VERIFICATION", causal)
+                    print("REPRODUCTION_EXECUTION_STATUS", reproduction.status, "REPRODUCTION_PATCHED_EXECUTION_STATUS", repro_patched.status, "REPRODUCTION_VERIFICATION", repro)
+                    payload.update({"authorization_control":modifier,"patched_execution":_json(patched),"causal_verification":{"state":"verified" if causal else "not_verified","chain_id":"causal:authorization-modifier-differential"},"reproduction_execution":_json(reproduction),"reproduction_patched_execution":_json(repro_patched),"reproduction_verification":{"state":"verified" if repro else "not_verified","chain_id":"reproduction:authorization-modifier-differential"},"finding_gate":"READY" if causal and repro and compiler.status != "source_dependency_closure_incomplete" else "NOT_READY"})
+                    if args.output:
+                        args.output.parent.mkdir(parents=True,exist_ok=True)
+                        args.output.write_text(json.dumps(_json(payload),indent=2)+"\n",encoding="utf-8")
+                    if not (causal and repro): return 4
                 if args.output:
-                    args.output.parent.mkdir(parents=True,exist_ok=True)
-                    args.output.write_text(json.dumps(_json(payload),indent=2)+"\n",encoding="utf-8")
-                if not (causal and repro): return 4
-            if args.output:
-                args.output.parent.mkdir(parents=True,exist_ok=True); args.output.write_text(json.dumps(_json(payload),indent=2)+"\n",encoding="utf-8")
-        return 0
+                    args.output.parent.mkdir(parents=True,exist_ok=True); args.output.write_text(json.dumps(_json(payload),indent=2)+"\n",encoding="utf-8")
+            return 0
+    finally:
+        # Persist evidence on every exit path, including returns and SystemExit.
+        if isinstance(payload, dict):
+            serialized_hypothesis = payload.get("hypothesis")
+            if isinstance(serialized_hypothesis, dict) and serialized_hypothesis.get("invariant_id") == "INV-AUTH-001":
+                payload["hypothesis_class"] = "unguarded_setter"
+        active_error = sys.exc_info()[1]
+        _persist_campaign_evidence(
+            args.output,
+            payload,
+            generated_artifact or generated,
+            str(active_error) if active_error else None,
+        )
+
 
 
 if __name__ == "__main__":
