@@ -7,6 +7,7 @@ from .owner_shape import OwnerShape
 from .public_getter_observation import PublicGetterObservation
 from .scalar_write import ScalarWrite
 from .nested_mapping_write import NestedMappingWrite
+from .array_push_write import ArrayPushWrite
 
 __all__ = [
     "AuthorityShape",
@@ -16,4 +17,5 @@ __all__ = [
     "PublicGetterObservation",
     "ScalarWrite",
     "NestedMappingWrite",
+    "ArrayPushWrite",
 ]
