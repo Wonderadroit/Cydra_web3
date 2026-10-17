@@ -412,21 +412,34 @@ def generate_blind_authorization_test_from_experiment(
             "        );",
         ]
     else:
-        # Without source-derived owner/role evidence, fail closed before the
-        # differential. A successful unauthorized call alone is not enough to
-        # claim a supported finding without the full causal/control evidence.
-        principal_setup = (
-            '        require(false, "CYDRA_MEASUREMENT_ASSERTION: '
-            'preconditions_not_established:authorized_control_unavailable");'
-        )
-        control_lines = [
-            "        vm.prank(unauthorized);",
-            "        (bool unauthorizedOk,) = address(target).call(payload);",
-            f"        if (unauthorizedOk && {state_after} != beforeState) {{",
-            f'            require(false, "{security_assertion_marker()}: unauthorized caller mutated modeled administrative state");',
-            "        }",
-            '        require(false, "CYDRA_MEASUREMENT_ASSERTION: authorized control unavailable; cannot establish rejected");',
-        ]
+        if function.modifiers:
+            # A guarded function without a source-verified principal/role cannot
+            # establish a rejection verdict. Fail before the target mutation.
+            principal_setup = (
+                '        require(false, "CYDRA_MEASUREMENT_ASSERTION: '
+                'preconditions_not_established:authorized_control_unavailable");'
+            )
+            control_lines = [
+                "        vm.prank(unauthorized);",
+                "        (bool unauthorizedOk,) = address(target).call(payload);",
+                f"        if (unauthorizedOk && {state_after} != beforeState) {{",
+                f'            require(false, "{security_assertion_marker()}: unauthorized caller mutated modeled administrative state");',
+                "        }",
+                '        require(false, "CYDRA_MEASUREMENT_ASSERTION: authorized control unavailable; cannot establish rejected");',
+            ]
+        else:
+            # For a source-unprotected setter, a directly observed unauthorized
+            # mutation can support the hypothesis; absence of mutation cannot
+            # establish rejection without an authorized control.
+            principal_setup = ""
+            control_lines = [
+                "        vm.prank(unauthorized);",
+                "        (bool unauthorizedOk,) = address(target).call(payload);",
+                f"        if (unauthorizedOk && {state_after} != beforeState) {{",
+                f'            require(false, "{security_assertion_marker()}: unauthorized caller mutated modeled administrative state");',
+                "        }",
+                '        require(false, "CYDRA_MEASUREMENT_ASSERTION: authorized control unavailable; cannot establish rejected");',
+            ]
     control_body = "\n".join(control_lines)
     source = f'''// SPDX-License-Identifier: UNLICENSED
 pragma solidity {pragma};
