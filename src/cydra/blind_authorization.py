@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+from dataclasses import dataclass
 
 from .models import ContractModel, Experiment, Hypothesis
 from .planned_call import render_function_arguments
 from .authorization_runtime import security_assertion_marker
 from .capabilities.owner_shape import OwnerShape
 from .capabilities.public_getter_observation import PublicGetterObservation
+from .capabilities.mapping_getter_observation import MappingGetterObservation
+from .capabilities.explicit_view_reader_observation import ExplicitViewReaderObservation
 
 
 def _constructor_argument(parameter, *, abi_only: bool = False) -> str:
@@ -108,7 +111,19 @@ def _parameter_names_and_types(signature: str) -> list[tuple[str, str]]:
     return parameters
 
 
-def _resolve_state_observer(
+@dataclass(frozen=True)
+class ObservationResult:
+    callable_name: str
+    return_type: str
+    target_parameter_indexes: list[int]
+    method_used: str
+
+    def __iter__(self):
+        # Preserve legacy three-value unpacking while exposing strategy metadata.
+        return iter((self.callable_name, self.return_type, self.target_parameter_indexes))
+
+
+def _resolve_state_observer_legacy(
     source_text: str, function: FunctionModel, written: str
 ) -> tuple[str, str, tuple[int, ...]] | None:
     """Resolve a state observation to a real view call and target-argument bindings.
@@ -222,6 +237,41 @@ def _resolve_state_observer(
         if name.lower() in patterns:
             return name, return_type, indexes
     return None
+
+
+def _resolve_state_observer(
+    source_text: str, function: FunctionModel, written: str
+) -> ObservationResult | None:
+    """Dispatch through source-backed observation capabilities.
+
+    The legacy resolver remains the compatibility binding layer for target
+    argument indexes; a capability must independently recognize the state
+    observer before its result can be returned.
+    """
+    legacy = _resolve_state_observer_legacy(source_text, function, written)
+    if legacy is None:
+        return None
+
+    capabilities = (
+        ("PublicGetterObservation", PublicGetterObservation(source_text)),
+        ("MappingGetterObservation", MappingGetterObservation(source_text)),
+        ("ExplicitViewReaderObservation", ExplicitViewReaderObservation(source_text)),
+    )
+    method_used = None
+    for method_name, capability in capabilities:
+        resolved = capability.resolve(written)
+        if resolved is not None and resolved[0] == legacy[0]:
+            method_used = method_name
+            break
+    if method_used is None:
+        return None
+    callable_name, return_type, indexes = legacy
+    return ObservationResult(
+        callable_name=callable_name,
+        return_type=return_type,
+        target_parameter_indexes=list(indexes),
+        method_used=method_used,
+    )
 
 
 def generate_blind_authorization_test_from_experiment(

@@ -52,3 +52,24 @@ class NestedMappingWrite(WriteForm):
 
     def extract_target(self, ast_node: Any) -> str | None:
         return self._target(ast_node)
+
+    def extract_args(self, ast_node: Any) -> list[str]:
+        """Return nested index expressions in source order."""
+        if not self.matches(ast_node):
+            return []
+        lhs = self._get(ast_node, "leftHandSide")
+        indexes = []
+        while self._get(lhs, "nodeType") == "IndexAccess":
+            indexes.append(self._get(lhs, "indexExpression"))
+            lhs = self._get(lhs, "baseExpression")
+        indexes.reverse()
+        return [self._expression_name(item) for item in indexes]
+
+    @classmethod
+    def _expression_name(cls, node: Any) -> str:
+        kind = cls._get(node, "nodeType")
+        if kind == "Identifier":
+            return str(cls._get(node, "name", ""))
+        if kind == "Literal":
+            return str(cls._get(node, "value", ""))
+        return ""

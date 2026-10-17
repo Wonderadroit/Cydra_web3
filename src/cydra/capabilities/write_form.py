@@ -21,3 +21,11 @@ class WriteForm(ABC):
     def extract_target(self, ast_node: Any) -> str | None:
         """Extract the written state target, or return None when unresolved."""
         raise NotImplementedError
+
+    def extract_args(self, ast_node: Any) -> list[str]:
+        """Extract index/key expressions in source order for indexed writes.
+
+        Existing callers can keep using extract_target(); forms without indexed
+        arguments intentionally return an empty list.
+        """
+        return []

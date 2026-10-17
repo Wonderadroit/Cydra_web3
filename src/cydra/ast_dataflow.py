@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterator
 
+from .capabilities.scalar_write import ScalarWrite
+from .capabilities.nested_mapping_write import NestedMappingWrite
+from .capabilities.array_push_write import ArrayPushWrite
+
 
 @dataclass(frozen=True)
 class SemanticRelationshipEvidence:
@@ -164,6 +168,46 @@ def _extract_direct(ast: dict[str, Any], file: str, global_function_nodes: dict[
         if not isinstance(body, dict):
             continue
         roles = _operator_contexts(body, states)
+        # Dispatch state mutations through the write-form capability list. Keep
+        # extract_target() string-compatible and preserve indexed keys separately.
+        write_method_by_identifier: dict[int, str] = {}
+        write_args_by_identifier: dict[int, list[str]] = {}
+        write_forms = (
+            ScalarWrite(states),
+            NestedMappingWrite(states),
+            ArrayPushWrite(states),
+        )
+
+        def storage_root(node: Any) -> dict[str, Any] | None:
+            current = node
+            while isinstance(current, dict) and current.get("nodeType") == "IndexAccess":
+                current = current.get("baseExpression")
+            return current if isinstance(current, dict) and current.get("nodeType") == "Identifier" else None
+
+        for candidate in _walk(body):
+            for form in write_forms:
+                if not form.matches(candidate):
+                    continue
+                target_name = form.extract_target(candidate)
+                if not target_name:
+                    continue
+                if candidate.get("nodeType") == "Assignment":
+                    root = storage_root(candidate.get("leftHandSide"))
+                    operator = candidate.get("operator")
+                    if operator != "=" and root is not None:
+                        roles[_node_id(root)] = "read_write" if _node_id(root) is not None else roles.get(_node_id(root), "read")
+                    elif root is not None and _node_id(root) is not None:
+                        roles[_node_id(root)] = "write"
+                else:
+                    callee = candidate.get("expression")
+                    receiver = callee.get("expression") if isinstance(callee, dict) else None
+                    root = storage_root(receiver)
+                    if root is not None and _node_id(root) is not None:
+                        roles[_node_id(root)] = "write"
+                if root is not None and _node_id(root) is not None:
+                    write_method_by_identifier[_node_id(root)] = type(form).__name__
+                    write_args_by_identifier[_node_id(root)] = form.extract_args(candidate)
+                break
         # Yul storage operations are not represented as Solidity VariableDeclaration
         # references. Record them as opaque, function-scoped effects; never equate
         # unrelated dynamic slot expressions or promote them directly to findings.
@@ -204,7 +248,14 @@ def _extract_direct(ast: dict[str, Any], file: str, global_function_nodes: dict[
                           source=f"solc-json-ast:{file}", ast_node_id=item_id,
                           source_location=_location(item), function_ast_node_id=function_id,
                           target_ast_node_id=ref,
-                          metadata={"function_kind": kind, "semantic_relation": semantic_role})
+                          metadata={
+                              "function_kind": kind,
+                              "semantic_relation": semantic_role,
+                              **({"write_method": write_method_by_identifier[item_id]}
+                                 if item_id in write_method_by_identifier else {}),
+                              **({"write_args": write_args_by_identifier[item_id]}
+                                 if item_id in write_args_by_identifier else {}),
+                          })
             evidence.append(SemanticRelationshipEvidence(**common))
             evidence.append(SemanticRelationshipEvidence(
                 **{**common, "relation": "reference", "confidence": 0.90,
