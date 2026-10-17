@@ -878,6 +878,10 @@ def main() -> int:
             return 0
     finally:
         # Persist evidence on every exit path, including returns and SystemExit.
+        if isinstance(payload, dict):
+            serialized_hypothesis = payload.get("hypothesis")
+            if isinstance(serialized_hypothesis, dict) and serialized_hypothesis.get("invariant_id") == "INV-AUTH-001":
+                payload["hypothesis_class"] = "unguarded_setter"
         active_error = sys.exc_info()[1]
         _persist_campaign_evidence(
             args.output,
