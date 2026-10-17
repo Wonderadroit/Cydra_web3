@@ -130,12 +130,22 @@ def _compatible_version(contents: dict[str, str], requested: str | None = None) 
                 constraints.append((unit, NpmSpec(expression)))
             except ValueError:
                 return None, f"unsupported_pragma:{unit}:{expression}"
+    # Query installed and downloadable versions independently. Failure to reach the
+    # release catalogue must not erase already-installed compilers or be reported
+    # as a mathematically impossible pragma intersection.
+    discovery_errors = []
     try:
         installed = {str(v) for v in solcx.get_installed_solc_versions()}
+    except Exception:
+        installed = set()
+        discovery_errors.append("installed")
+    try:
         available = {str(v) for v in solcx.get_installable_solc_versions()}
     except Exception:
-        installed, available = set(), set()
-    candidates = sorted(available | installed, key=Version, reverse=True)
+        available = set()
+        discovery_errors.append("installable")
+    all_candidates = installed | available
+    candidates = sorted(all_candidates, key=Version, reverse=True)
     if requested:
         candidates = [requested] if requested in candidates else []
     compatible = []
@@ -144,6 +154,12 @@ def _compatible_version(contents: dict[str, str], requested: str | None = None) 
         if all(spec.match(parsed) for _, spec in constraints):
             compatible.append(version)
     if not compatible:
+        if not all_candidates:
+            if discovery_errors:
+                return None, "compiler_version_discovery_failed"
+            return None, "compiler_unavailable"
+        if requested and requested not in all_candidates:
+            return None, "requested_compiler_unavailable"
         return None, "unsatisfiable_pragma_intersection"
     return compatible[0], "ok"
 
