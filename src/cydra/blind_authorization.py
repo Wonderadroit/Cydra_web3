@@ -118,10 +118,10 @@ def _resolve_state_observer(
     # Public scalar or mapping auto-getter. For mappings, extract keys from the
     # declaration in order; do not reuse target-function parameter order blindly.
     declaration = re.search(
-        r"\\bmapping\\s*\\(\\s*([A-Za-z_]\\w*)\\s*(?:([A-Za-z_]\\w*))?\\s*=>\\s*"
-        r"mapping\\s*\\(\\s*([A-Za-z_]\\w*)\\s*(?:([A-Za-z_]\\w*))?\\s*=>\\s*"
-        r"([A-Za-z_]\\w*)\\s*(?:([A-Za-z_]\\w*))?\\s*\\)\\s*\\)\\s*public\\s+"
-        + re.escape(written) + r"\\b",
+        r"\bmapping\s*\(\s*([A-Za-z_]\w*)\s*(?:([A-Za-z_]\w*))?\s*=>\s*"
+        r"mapping\s*\(\s*([A-Za-z_]\w*)\s*(?:([A-Za-z_]\w*))?\s*=>\s*"
+        r"([A-Za-z_]\w*)\s*(?:([A-Za-z_]\w*))?\s*\)\s*\)\s*public\s+"
+        + re.escape(written) + r"\b",
         source_text,
     )
     scalar = re.search(
