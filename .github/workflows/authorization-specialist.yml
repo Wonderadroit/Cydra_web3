@@ -67,19 +67,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Preflight direct-solc dependency ancestry
-        env:
-          DIRECT_SOLC_COMMIT: d2087426dfeb4963bf20f9b330decaf97a3419fe
+      - name: Preflight direct-solc capabilities
         run: |
-          # Fetch the dependency PR head so its commit is available for the ancestry check.
-          git fetch --no-tags origin refs/pull/79/head:refs/remotes/origin/pr-79-head
-          git cat-file -e "${DIRECT_SOLC_COMMIT}^{commit}"
-          if ! git merge-base --is-ancestor "$DIRECT_SOLC_COMMIT" HEAD; then
-            echo "::error::Verification HEAD does not contain direct-solc dependency $DIRECT_SOLC_COMMIT."
-            echo "Do not run the target campaign until this dependency is merged into the verification branch."
-            exit 1
-          fi
-          echo "DIRECT_SOLC_ANCESTRY=PASS commit=$DIRECT_SOLC_COMMIT head=$(git rev-parse HEAD)"
+          python -m pip install --upgrade pip pytest
+          python -m pip install -e .
+          python -m pytest -q tests/test_compiler_standard_json_diagnostics.py tests/test_solc_second_level_import.py
+          echo "DIRECT_SOLC_CAPABILITIES=PASS"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
