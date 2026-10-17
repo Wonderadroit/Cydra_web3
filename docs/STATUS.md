@@ -11,7 +11,7 @@
 
 ## Open and active
 - **Active validation:** Virtuals campaign run [#39044831809](https://github.com/Wonderadroit/Cydra_web3/actions/runs/39044831809), branch `verification/direct-solc-integration`, SHA `8fe00176ee004f2592e593e8bc78f4796b336f46`. Direct-solc dependency-ancestry preflight passed; dependencies installed from the pinned Yarn lockfile.
-- **Known-gap record:** [Issue #84](https://github.com/Wonderadroit/Cydra_web3/issues/84) records Virtuals `AgentNftV2.addValidator` as unmeasurable at hypothesis conversion. Keep the corpus as the decision record; do not count this as safe or vulnerable.
+- **Active fix:** [Draft PR #86](https://github.com/Wonderadroit/Cydra_web3/pull/86) adds compiler-AST cross-source write binding, a regression fixture, compiler-status persistence, and `pytest -q -rs`. CI passes on the verification branch; the PR is not merged. The exact skip is `Foundry toolchain is not installed` in the Python-only workflow, a setup/platform skip; the authorization workflow with Foundry installed passes without a skip.
 - **Regression:** Python tests passed on the active run's branch. The workflow used `pytest -q`, not `-rs`; the skipped test's reason remains unknown.
 
 ## Known gap — Virtuals is upstream of the getter matcher
