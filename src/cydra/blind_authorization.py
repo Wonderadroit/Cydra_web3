@@ -297,34 +297,8 @@ def generate_blind_authorization_test_from_experiment(
             f"no_matching_getter:{first_missing}; authorization differential is unmeasurable"
         )
 
-    # Resolve the authorized actor only from a recognized modifier guard in the
-    # target source. Do not guess owner/admin identity from names alone.
-    modifier_bodies = {
-        match.group(1): match.group(2)
-        for match in re.finditer(
-            r"\bmodifier\s+([A-Za-z_]\w*)\s*\([^)]*\)\s*\{([^{}]*)\}",
-            source_text,
-            re.DOTALL,
-        )
-    }
-    principal = None
-    for modifier in function.modifiers:
-        body = modifier_bodies.get(modifier)
-        if body is None:
-            continue
-        guard = re.search(
-            r"\bmsg\s*\.\s*sender\s*==\s*([A-Za-z_]\w*)|"
-            r"\b([A-Za-z_]\w*)\s*==\s*msg\s*\.\s*sender\b",
-            body,
-        )
-        if guard:
-            candidate = guard.group(1) or guard.group(2)
-            if re.search(
-                rf"\baddress(?:\s+payable)?\s+public\s+{re.escape(candidate)}\s*;",
-                source_text,
-            ):
-                principal = candidate
-                break
+    # Resolve the authorized actor through the source-backed owner shape.
+    principal = OwnerShape().resolve_authorized(source_text, function)
     # Use a valid, state-changing argument vector for both callers. The attacker
     # is tested first; the authorized control then uses the exact same calldata.
     # If no argument can be varied consistently with the observed state type, fail
