@@ -159,6 +159,23 @@ def _source_dependency_closure(
     return closure, tuple(sorted(unresolved))
 
 
+def _disk_paths_for_source_keys(project: Path, source_keys: set[str]) -> tuple[tuple[str, str], ...]:
+    """Bind compiler source-unit keys to existing files in the checked-out project."""
+    project = project.resolve()
+    remappings = _project_remappings(project)
+    output: list[tuple[str, str]] = []
+    for key in sorted(source_keys):
+        normalized = key.replace(chr(92), "/")
+        candidates = [project / normalized, project / "node_modules" / normalized]
+        for prefix, target in remappings:
+            if normalized.startswith(prefix):
+                candidates.append(project / target / normalized[len(prefix):])
+        disk_path = next((candidate.resolve() for candidate in candidates if candidate.is_file()), None)
+        if disk_path is not None:
+            output.append((key, str(disk_path)))
+    return tuple(output)
+
+
 def _source_asts(payload: dict[str, Any], source_allowlist: set[str] | None = None) -> tuple[tuple[str, dict[str, Any]], ...]:
     """Return every compiler AST in this build unit, including imported base contracts.
 
@@ -434,4 +451,5 @@ def compile_state_effects(project: str | Path, source: str | Path) -> CompilerEv
             completed.stdout, completed.stderr, tuple(map(str, build_files)),
             tuple(sorted(versions)), len(build_files), matched_source_count,
             source_ast_found, len(dependency_sources), tuple(sorted(unresolved_imports)),
+            source_closure=_disk_paths_for_source_keys(project_path, dependency_sources),
         )
