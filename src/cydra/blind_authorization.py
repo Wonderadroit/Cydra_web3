@@ -374,9 +374,9 @@ def generate_blind_authorization_test_from_experiment(
     observer_encode_args = f", {observer_arguments}" if observer_arguments else ""
     state_snapshot = (
         f"(bool __stateOk, bytes memory __stateData) = address(target).staticcall("
-        f'abi.encodeWithSignature("{observer_signature}"{observer_encode_args}));\\n'
+        f'abi.encodeWithSignature("{observer_signature}"{observer_encode_args}));\n'
         f'        require(__stateOk && __stateData.length >= 32, '
-        f'"CYDRA_MEASUREMENT_ASSERTION: preconditions_not_established:state_unreadable");\\n'
+        f'"CYDRA_MEASUREMENT_ASSERTION: preconditions_not_established:state_unreadable");\n'
         f"        {state_type} beforeState = abi.decode(__stateData, ({state_type}));"
     )
     state_after = observer_call
