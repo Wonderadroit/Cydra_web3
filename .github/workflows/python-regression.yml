@@ -21,4 +21,4 @@ jobs:
       - run: python -m pip install -e .
       - name: Provision verified Solidity compiler
         run: python -c "import solcx; solcx.install_solc('0.8.26'); assert '0.8.26' in {str(v) for v in solcx.get_installed_solc_versions()}"
-      - run: python -m pytest
+      - run: python -m pytest -q -rs

@@ -4,6 +4,7 @@ import shutil
 import pytest
 
 from cydra.authorization_pipeline import investigate_authorization
+from cydra.ast_dataflow import SemanticRelationshipEvidence
 from cydra.authorization_runtime import classify_authorization_blind_execution
 from cydra.blind_authorization import generate_blind_authorization_test_from_experiment
 from cydra.foundry import ExecutionResult, run_foundry_test
@@ -290,3 +291,37 @@ def test_guarded_setter_uses_authorized_vs_unauthorized_state_differential(tmp_p
     unmeasurable = classify_authorization_blind_execution(hypothesis, unmeasurable_execution)
     assert unmeasurable.measurement_verdict == "unmeasurable"
     assert unmeasurable.benchmark_status == "proposed"
+
+
+def test_compiler_propagated_cross_source_writes_reach_authorization_seed(tmp_path: Path):
+    source = tmp_path / "AgentNftV2.sol"
+    source.write_text(
+        "pragma solidity ^0.8.20;\n"
+        "contract AgentNftV2 {\n"
+        "  mapping(uint256 => mapping(address => bool)) internal _validatorsMap;\n"
+        "  mapping(uint256 => address[]) internal _validators;\n"
+        "  mapping(uint256 => mapping(address => uint256)) internal _baseValidatorScore;\n"
+        "  function isValidator(uint256 virtualId, address validator) public view returns (bool) { return _validatorsMap[virtualId][validator]; }\n"
+        "  function addValidator(uint256 virtualId, address validator) public { if (isValidator(virtualId, validator)) return; _addValidator(virtualId, validator); _initValidatorScore(virtualId, validator); }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    states = ("_validators", "_validatorsMap", "_baseValidatorScore")
+    evidence = tuple(
+        SemanticRelationshipEvidence(
+            contract="AgentNftV2", function="addValidator", relation="writes", target=state,
+            confidence=0.94, source="solc-json-ast-internal-call:ValidatorRegistry.sol",
+            function_ast_node_id=100, metadata={"propagated_from_internal_call": "_addValidator" if state != "_baseValidatorScore" else "_initValidatorScore", "propagation": "transitive-internal-call"},
+        )
+        for state in states
+    )
+
+    result = investigate_authorization(source, target="virtuals-cross-source-fixture@pinned", semantic_evidence=evidence)
+    contract = next(item for item in result.contracts if item.name == "AgentNftV2")
+    function = next(item for item in contract.functions if item.name == "addValidator")
+    seed = next(item for item in result.seeds if item.target_function == "addValidator")
+
+    assert set(function.writes) == set(states)
+    assert set(seed.observed_writes) == set(states)
+    assert any(item.hypothesis_id == "H-AUTH-addValidator" for item in result.hypotheses)
+    assert {item.state for item in result.derived_effects if item.function == "addValidator"} >= set(states)

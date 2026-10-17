@@ -126,6 +126,42 @@ def _with_transitive_internal_writes(
     return replace(contract, functions=tuple(enriched)), tuple(derived)
 
 
+def _with_compiler_effect_writes(
+    contract: ContractModel,
+    evidence: tuple[SemanticRelationshipEvidence, ...],
+) -> tuple[ContractModel, tuple[DerivedWriteEvidence, ...]]:
+    """Bind compiler-AST state effects, including cross-source helper effects, to caller models."""
+    by_function: dict[str, set[str]] = {}
+    provenance: dict[tuple[str, str], SemanticRelationshipEvidence] = {}
+    for item in evidence:
+        if item.contract != contract.name or item.relation not in {"writes", "transition_expression"}:
+            continue
+        if not item.target or item.target.startswith("YUL_SLOT:"):
+            continue
+        # Only compiler-linked AST relationships can enrich the executable model.
+        if not item.source.startswith(("solc-json-ast:", "solc-json-ast-internal-call:")):
+            continue
+        by_function.setdefault(item.function, set()).add(item.target)
+        provenance.setdefault((item.function, item.target), item)
+
+    enriched_functions: list[FunctionModel] = []
+    derived: list[DerivedWriteEvidence] = []
+    for function in contract.functions:
+        compiler_writes = by_function.get(function.name, set())
+        enriched_functions.append(replace(function, writes=tuple(sorted(set(function.writes) | compiler_writes))))
+        for state in sorted(compiler_writes - set(function.writes)):
+            item = provenance[(function.name, state)]
+            derived.append(DerivedWriteEvidence(
+                contract=contract.name,
+                function=function.name,
+                state=state,
+                via_function=str((item.metadata or {}).get("propagated_from_internal_call", "compiler-ast-effect")),
+                source=item.source,
+                source_line=function.line,
+            ))
+    return replace(contract, functions=tuple(enriched_functions)), tuple(derived)
+
+
 def investigate_authorization(
     source: str | Path,
     *,
@@ -144,8 +180,10 @@ def investigate_authorization(
     derived: list[DerivedWriteEvidence] = []
     for contract in parsed:
         enriched, effects = _with_transitive_internal_writes(contract, source_path)
+        enriched, compiler_effects = _with_compiler_effect_writes(enriched, semantic_evidence)
         modeled.append(enriched)
         derived.extend(effects)
+        derived.extend(compiler_effects)
 
     # Seeds are a separate pre-proof artifact; do not derive their existence from
     # whether the narrower exploit-candidate filter emits a hypothesis.
