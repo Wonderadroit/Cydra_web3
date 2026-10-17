@@ -296,14 +296,14 @@ def test_guarded_setter_uses_authorized_vs_unauthorized_state_differential(tmp_p
 def test_compiler_propagated_cross_source_writes_reach_authorization_seed(tmp_path: Path):
     source = tmp_path / "AgentNftV2.sol"
     source.write_text(
-        "pragma solidity ^0.8.20;\\n"
-        "contract AgentNftV2 {\\n"
-        "  mapping(uint256 => mapping(address => bool)) internal _validatorsMap;\\n"
-        "  mapping(uint256 => address[]) internal _validators;\\n"
-        "  mapping(uint256 => mapping(address => uint256)) internal _baseValidatorScore;\\n"
-        "  function isValidator(uint256 virtualId, address validator) public view returns (bool) { return _validatorsMap[virtualId][validator]; }\\n"
-        "  function addValidator(uint256 virtualId, address validator) public { if (isValidator(virtualId, validator)) return; _addValidator(virtualId, validator); _initValidatorScore(virtualId, validator); }\\n"
-        "}\\n",
+        "pragma solidity ^0.8.20;\n"
+        "contract AgentNftV2 {\n"
+        "  mapping(uint256 => mapping(address => bool)) internal _validatorsMap;\n"
+        "  mapping(uint256 => address[]) internal _validators;\n"
+        "  mapping(uint256 => mapping(address => uint256)) internal _baseValidatorScore;\n"
+        "  function isValidator(uint256 virtualId, address validator) public view returns (bool) { return _validatorsMap[virtualId][validator]; }\n"
+        "  function addValidator(uint256 virtualId, address validator) public { if (isValidator(virtualId, validator)) return; _addValidator(virtualId, validator); _initValidatorScore(virtualId, validator); }\n"
+        "}\n",
         encoding="utf-8",
     )
     states = ("_validators", "_validatorsMap", "_baseValidatorScore")
