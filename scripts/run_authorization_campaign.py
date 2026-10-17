@@ -251,94 +251,72 @@ def _materialize_target_dependencies(project: Path) -> dict:
 
 
 
-def _prepare_isolated_foundry_project(target_root: Path, source: Path, destination: Path) -> Path:
-    """Copy only the target's local Solidity import closure into a clean Foundry root."""
-    source_root = next(
-        (
-            candidate
-            for candidate in (source.parents)
-            if candidate.name in {"src", "contracts"}
-        ),
-        target_root,
-    )
+def _prepare_isolated_foundry_project(
+    target_root: Path,
+    closure: dict[str, Path],
+    destination: Path,
+    *,
+    required_keys: tuple[str, ...] = (),
+) -> Path:
+    """Stage the compiler-resolved source closure without resolving imports again."""
+    missing = [key for key in required_keys if key not in closure]
+    if missing:
+        raise RuntimeError(f"missing_from_closure:{missing[0]}")
+
     src_root = destination / "src"
-    src_root.mkdir(parents=True, exist_ok=True)
     test_root = destination / "test" / "generated"
     test_root.mkdir(parents=True, exist_ok=True)
 
-    pending = [source]
-    copied: set[Path] = set()
-    while pending:
-        current = pending.pop()
-        try:
-            relative = current.relative_to(source_root)
-            destination_file = src_root / relative
-        except ValueError:
-            relative = current.relative_to(target_root)
-            # npm packages must remain at the isolated Foundry root because
-            # remappings such as @openzeppelin/=node_modules/@openzeppelin/
-            # resolve from there. Other dependency trees are staged under src/.
-            if relative.parts and relative.parts[0] == "node_modules":
-                destination_file = destination / relative
-            else:
-                destination_file = src_root / relative
-        if current in copied:
-            continue
-        copied.add(current)
+    staged_keys: set[str] = set()
+    for key, disk_path in closure.items():
+        source_path = Path(disk_path)
+        if not source_path.is_file():
+            raise RuntimeError(f"missing_from_closure:{key}")
+        destination_file = destination / Path(key)
         destination_file.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(current, destination_file)
+        shutil.copy2(source_path, destination_file)
+        staged_keys.add(Path(key).as_posix())
 
-        text = current.read_text(encoding="utf-8")
-        remappings = []
-        remappings_file = target_root / "remappings.txt"
-        if remappings_file.exists():
-            for line in remappings_file.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                prefix, destination_path = line.split("=", 1)
-                remappings.append((prefix, destination_path))
-        for imported in _IMPORT_RE.findall(text):
-            if imported.startswith("."):
-                dependency = (current.parent / imported).resolve()
-            elif imported.startswith("contracts/"):
-                dependency = (target_root / imported).resolve()
-            else:
-                dependency = None
-                for prefix, destination_path in sorted(remappings, key=lambda item: len(item[0]), reverse=True):
-                    if imported.startswith(prefix):
-                        suffix = imported[len(prefix):]
-                        dependency = (target_root / destination_path / suffix).resolve()
-                        break
-                if dependency is None:
-                    continue
-            if dependency.is_file() and dependency not in copied:
-                pending.append(dependency)
+    # Preserve project remappings only when their target is represented in the
+    # compiler closure. Since closure keys are copied verbatim, destinations
+    # point to the same paths inside the isolated project.
+    remappings: list[str] = []
+    # Every compiler source-unit key is staged verbatim. Derive identity mappings
+    # from those keys so package-shaped imports remain addressable without
+    # inventing a second filesystem resolver.
+    for key in sorted(staged_keys):
+        parts = Path(key).parts
+        if not parts:
+            continue
+        root = f"{parts[0]}/{parts[1]}/" if parts[0].startswith("@") and len(parts) > 1 else f"{parts[0]}/"
+        if any(item.startswith(root) for item in staged_keys):
+            remappings.append(f"{root}={root}")
 
-    remapping_lines = []
-    for prefix, destination_path in remappings:
-        # npm remapping destinations already include their root prefix. Do not
-        # prepend node_modules again; doing so creates node_modules/node_modules/...
-        # Non-npm dependencies copied into src/ need that staging prefix.
-        if destination_path.startswith("node_modules/"):
-            remapping_lines.append(f"{prefix}={destination_path}")
-        else:
-            remapping_lines.append(f"{prefix}=src/{destination_path}")
-    remapping_literal = ", ".join(repr(item) for item in remapping_lines)
+    remappings_file = target_root / "remappings.txt"
+    if remappings_file.is_file():
+        for raw in remappings_file.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            prefix, target = line.split("=", 1)
+            target = target.strip().rstrip("/")
+            if any(key == target or key.startswith(target + "/") for key in staged_keys):
+                remappings.append(f"{prefix}={target}/")
+            elif any(key == prefix.rstrip("/") or key.startswith(prefix) for key in staged_keys):
+                remappings.append(f"{prefix}={prefix}")
+
+    remapping_literal = ", ".join(repr(item) for item in sorted(set(remappings)))
     (destination / "foundry.toml").write_text(
         '[profile.default]\n'
-        'src = "src"\n'
+        'src = "."\n'
         'test = "test"\n'
         'libs = ["lib"]\n'
         'auto_detect_solc = true\n'
         f"remappings = [{remapping_literal}]\n",
         encoding="utf-8",
     )
-    hardhat_console = destination / "lib" / "hardhat" / "console.sol"
-    hardhat_console.parent.mkdir(parents=True, exist_ok=True)
-    hardhat_console.write_text("pragma solidity ^0.6.12; library console {}\n", encoding="utf-8")
     (destination / "remappings.txt").write_text(
-        "\n".join(remapping_lines) + "\n",
+        "\n".join(sorted(set(remappings))) + ("\n" if remappings else ""),
         encoding="utf-8",
     )
     return test_root
@@ -744,17 +722,18 @@ def main() -> int:
                 return 2
 
             execution_project = Path(temp) / "execution-project"
-            _prepare_isolated_foundry_project(checkout, source, execution_project)
-
-            source_root = next(
-                (
-                    candidate
-                    for candidate in source.parents
-                    if candidate.name in {"src", "contracts"}
-                ),
-                project,
+            closure = {key: Path(disk_path) for key, disk_path in compiler.source_closure}
+            source_key = next(
+                (key for key, disk_path in closure.items() if disk_path.resolve() == source.resolve()),
+                None,
             )
-            source_relative = Path(source).relative_to(source_root)
+            if source_key is None:
+                raise RuntimeError(f"missing_from_closure:{source.relative_to(project).as_posix()}")
+            _prepare_isolated_foundry_project(
+                checkout, closure, execution_project, required_keys=(source_key,)
+            )
+
+            source_relative = Path(source_key)
             for hypothesis in hypotheses:
                 experiment = next(e for e in result.experiments if e.hypothesis_id == hypothesis.hypothesis_id)
                 contract = next(
@@ -773,7 +752,7 @@ def main() -> int:
                         hypothesis,
                         experiment,
                         os.path.relpath(
-                            execution_project / "src" / Path(contract.source).relative_to(source_root),
+                            execution_project / source_relative,
                             output.parent,
                         ).replace(os.sep, "/"),
                         contract.name,
@@ -845,10 +824,10 @@ def main() -> int:
                     payload["exit_reason"] = "expected_outcome_mismatch"
                     return 2
                 if args.require_ready and outcome.benchmark_status=="confirmed":
-                    isolated_source = execution_project / "src" / source_relative
+                    isolated_source = execution_project / source_relative
                     auth_context = "\n".join(
                         path.read_text(encoding="utf-8")
-                        for path in sorted((execution_project / "src").rglob("*.sol"))
+                        for path in sorted(execution_project.rglob("*.sol")) if "test" not in path.relative_to(execution_project).parts
                     )
                     modifier = _auth_modifier(auth_context)
                     print("AUTHORIZATION_CONTROL", modifier)
