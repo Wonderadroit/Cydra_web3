@@ -106,3 +106,43 @@ def test_mapping_write_uses_one_hop_is_reader_for_authorization_differential(
     assert execution.tests_run == 1
     outcome = classify_authorization_blind_execution(hypothesis, execution)
     assert outcome.measurement_verdict == expected_verdict
+
+
+def test_preconditions_probe_checks_staticcall_observer_before_authority(tmp_path: Path):
+    project = tmp_path / "PreconditionTarget"
+    source = project / "src" / "PreconditionTarget.sol"
+    test_dir = project / "test" / "generated"
+    source.parent.mkdir(parents=True)
+    test_dir.mkdir(parents=True)
+    source.write_text(
+        "pragma solidity ^0.8.20; contract PreconditionTarget { "
+        "address public owner; constructor() { owner = msg.sender; } "
+        "modifier onlyOwner() { require(msg.sender == owner); _; } "
+        "mapping(uint256 => mapping(address => bool)) private _validatorsMap; "
+        "function isValidator(uint256, address) public view returns (bool) { "
+        "revert(\\"observer unavailable\\"); } "
+        "function addValidator(uint256, address) external onlyOwner { } }",
+        encoding="utf-8",
+    )
+    function = FunctionModel(
+        name="addValidator", visibility="external", modifiers=("onlyOwner",),
+        writes=("_validatorsMap",), external_calls=(), line=1,
+        parameters=(ParameterModel("virtualId", "uint256"), ParameterModel("validator", "address")),
+        source=str(source),
+    )
+    model = ContractModel(name="PreconditionTarget", source=str(source), functions=(function,), pragma="^0.8.20")
+    hypothesis = Hypothesis("H-AUTH-precondition", "guarded setter", "INV-AUTH-001",
+                            "addValidator", "arbitrary caller", "unauthorized mutation")
+    experiment = Experiment("E-AUTH-precondition", hypothesis.hypothesis_id, "call setter",
+                            ("mutation", "rejection"), 1.0,
+                            planned_inputs=("1", "address(0x1001)"), target_function="addValidator")
+    generated = generate_blind_authorization_test_from_experiment(
+        hypothesis, experiment, "../../src/PreconditionTarget.sol", "PreconditionTarget",
+        test_dir / "PreconditionTarget.t.sol", model,
+    )
+    harness = generated.read_text(encoding="utf-8")
+    assert "address(target).staticcall(" in harness
+    assert "preconditions_not_established:state_unreadable" in harness
+    assert harness.index("preconditions_not_established:state_unreadable") < harness.index(
+        "preconditions_not_established:authorized_control_unavailable"
+    )
