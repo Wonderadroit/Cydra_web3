@@ -281,6 +281,17 @@ def _prepare_isolated_foundry_project(
     # compiler closure. Since closure keys are copied verbatim, destinations
     # point to the same paths inside the isolated project.
     remappings: list[str] = []
+    # Every compiler source-unit key is staged verbatim. Derive identity mappings
+    # from those keys so package-shaped imports remain addressable without
+    # inventing a second filesystem resolver.
+    for key in sorted(staged_keys):
+        parts = Path(key).parts
+        if not parts:
+            continue
+        root = f"{parts[0]}/{parts[1]}/" if parts[0].startswith("@") and len(parts) > 1 else f"{parts[0]}/"
+        if any(item.startswith(root) for item in staged_keys):
+            remappings.append(f"{root}={root}")
+
     remappings_file = target_root / "remappings.txt"
     if remappings_file.is_file():
         for raw in remappings_file.read_text(encoding="utf-8").splitlines():
@@ -816,7 +827,7 @@ def main() -> int:
                     isolated_source = execution_project / source_relative
                     auth_context = "\n".join(
                         path.read_text(encoding="utf-8")
-                        for path in sorted((execution_project / "src").rglob("*.sol"))
+                        for path in sorted(execution_project.rglob("*.sol")) if "test" not in path.relative_to(execution_project).parts
                     )
                     modifier = _auth_modifier(auth_context)
                     print("AUTHORIZATION_CONTROL", modifier)
