@@ -119,7 +119,8 @@ def test_preconditions_probe_checks_staticcall_observer_before_authority(tmp_pat
         "address public owner; constructor() { owner = msg.sender; } "
         "modifier onlyOwner() { require(msg.sender == owner); _; } "
         "mapping(uint256 => mapping(address => bool)) private _validatorsMap; "
-        "function isValidator(uint256, address) public view returns (bool) { "
+        "function isValidator(uint256 virtualId, address account) public view returns (bool) { "
+        "bool ignored = _validatorsMap[virtualId][account]; ignored; "
         "revert(\"observer unavailable\"); } "
         "function addValidator(uint256, address) external onlyOwner { } }",
         encoding="utf-8",
@@ -146,3 +147,8 @@ def test_preconditions_probe_checks_staticcall_observer_before_authority(tmp_pat
     assert harness.index("preconditions_not_established:state_unreadable") < harness.index(
         "preconditions_not_established:authorized_control_unavailable"
     )
+    execution = run_foundry_test(project, generated, experiment.experiment_id, "PreconditionTarget")
+    assert execution.executed is True
+    outcome = classify_authorization_blind_execution(hypothesis, execution)
+    assert outcome.measurement_verdict == "unmeasurable"
+    assert "preconditions_not_established:state_unreadable" in outcome.evidence.claim
