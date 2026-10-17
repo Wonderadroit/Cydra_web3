@@ -12,11 +12,11 @@ class ObservationMethod(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def emit_probe(self, write: Any) -> str:
-        """Render a probe only for an already-resolved observation method."""
+    def emit_probe(self, write: Any, args: list[str] | None = None) -> str:
+        """Render a probe using source-backed getter arguments when required."""
         raise NotImplementedError
 
     @abstractmethod
-    def read_state(self, context: Any) -> Any:
-        """Read the observed state from the supplied execution context."""
+    def read_state(self, context: Any, args: list[Any] | None = None) -> Any:
+        """Read observed state from the supplied execution context."""
         raise NotImplementedError

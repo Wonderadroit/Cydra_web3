@@ -19,7 +19,7 @@ def test_missing_getter_fails_closed_with_none():
     assert observation.resolve("missing") is None
     assert observation.can_observe("missing") is False
     assert observation.read_state({}) is None
-    assert observation.last_reason == "getter_unavailable"
+    assert observation.last_reason == "getter_not_found"
 
 
 def test_reverting_getter_fails_closed_and_records_reason():
@@ -28,7 +28,7 @@ def test_reverting_getter_fails_closed_and_records_reason():
 
     observation = PublicGetterObservation(getter_name="total")
     assert observation.read_state({"getters": {"total": reverted}}) is None
-    assert observation.last_reason == "getter_reverted:RuntimeError"
+    assert observation.last_reason == "call_reverted"
 
 
 def test_candidate_getter_choice_is_deterministic():
