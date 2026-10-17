@@ -79,3 +79,26 @@ def test_remapping_import_resolves_to_normalized_source_unit(tmp_path):
     sources, unresolved = _closure(tmp_path, entry)
     assert unresolved == []
     assert "lib/Thing.sol" in sources
+
+def test_empty_compiler_catalog_is_not_misreported_as_pragma_conflict(monkeypatch):
+    monkeypatch.setattr(direct.solcx, "get_installed_solc_versions", lambda: [])
+    monkeypatch.setattr(direct.solcx, "get_installable_solc_versions", lambda: [])
+    contents = {"A.sol": "pragma solidity ^0.8.20; contract A {}"}
+
+    version, status = direct._compatible_version(contents)
+
+    assert version is None
+    assert status == "compiler_unavailable"
+
+
+def test_compiler_catalog_failure_is_distinguished_from_pragma_conflict(monkeypatch):
+    monkeypatch.setattr(direct.solcx, "get_installed_solc_versions", lambda: [])
+    def unavailable_catalog():
+        raise OSError("catalogue unavailable")
+    monkeypatch.setattr(direct.solcx, "get_installable_solc_versions", unavailable_catalog)
+    contents = {"A.sol": "pragma solidity ^0.8.20; contract A {}"}
+
+    version, status = direct._compatible_version(contents)
+
+    assert version is None
+    assert status == "compiler_version_discovery_failed"
