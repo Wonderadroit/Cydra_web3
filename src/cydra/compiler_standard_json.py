@@ -122,7 +122,7 @@ def _closure_with_paths(project: Path, entry: Path) -> tuple[dict[str, str], lis
 
 
 def _closure(project: Path, entry: Path) -> tuple[dict[str, str], list[str]]:
-    \"\"\"Backward-compatible content closure for callers that do not need disk paths.\"\"\"
+    """Backward-compatible content closure for callers that do not need disk paths."""
     contents, unresolved, _source_paths = _closure_with_paths(project, entry)
     return contents, unresolved
 
