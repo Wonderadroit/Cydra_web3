@@ -256,7 +256,7 @@ def test_guarded_setter_uses_authorized_vs_unauthorized_state_differential(tmp_p
     # not inferred from the fallback "call must revert" assertion.
     assert "vm.prank(unauthorized);" in harness
     assert "vm.prank(authorized);" in harness
-    assert "target.owner()" in harness
+    assert 'abi.encodeWithSignature("owner()")' in harness
     assert "target.manager()" in harness
     assert "unauthorized differential control was not established" in harness
     assert "authorized control failed" in harness
