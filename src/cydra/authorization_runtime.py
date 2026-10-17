@@ -57,9 +57,9 @@ def classify_authorization_blind_execution(
         measurement_verdict = "supported"
         internal_status = benchmark_status = "confirmed"
     elif _measurement_assertion_failed(execution):
-        output = f"{execution.stdout}\\n{execution.stderr}"
+        output = f"{execution.stdout}\n{execution.stderr}"
         reason = re.search(
-            r"CYDRA_MEASUREMENT_ASSERTION:\\s*([A-Za-z0-9_:-]+)", output
+            r"CYDRA_MEASUREMENT_ASSERTION:\s*([A-Za-z0-9_:-]+)", output
         )
         semantics = reason.group(1) if reason else "differential_control_not_established"
         measurement_verdict = "unmeasurable"
