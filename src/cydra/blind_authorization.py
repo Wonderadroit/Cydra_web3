@@ -443,8 +443,8 @@ contract CydraBlindAuthorizationTest {{
     function testAuthorizationDifferentialOnModeledState() public {{
         address unauthorized = address(0xCAFE);
         {principal_setup}
-        {state_snapshot}
         {mutable_value}
+        {state_snapshot}
         bytes memory payload = abi.encodeWithSignature(
             "{function.name}({parameter_types})",
             {argument_list}
