@@ -66,14 +66,14 @@ Artifact: [campaign artifact](https://github.com/Wonderadroit/Cydra_web3/actions
 - Integration audit before Day 6: blind_authorization.py imports PublicGetterObservation but still contains its own inline resolver; it does not dispatch through an observation-method list, and MappingGetterObservation is not called there. ast_dataflow.py contains none of ScalarWrite, NestedMappingWrite, or ArrayPushWrite; the write-form capabilities are not dispatched there. Treat both chains as unwired until explicit integration and regression prove otherwise.
 
 ## Integration gate — do not run Virtuals until:
-- [ ] WriteForm preserves indexed args (or extract_args added)
-- [ ] _resolve_state_observer dispatches through capability list, records method_used
-- [ ] ast_dataflow dispatches through write-form list, records write_method
-- [ ] Two production-entry-point integration tests pass
-- [ ] Full regression green
+- [x] WriteForm preserves indexed args through additive extract_args(); extract_target() remains string-compatible
+- [x] _resolve_state_observer returns tuple-unpacking-compatible ObservationResult and records method_used
+- [x] ast_dataflow dispatches through ScalarWrite, NestedMappingWrite, and ArrayPushWrite; write evidence records write_method
+- [x] Two production-entry-point integration tests assert MappingGetterObservation and NestedMappingWrite metadata
+- [x] Full regression green on implementation commit 0bd17c5fed8de47ee3c743ba7898e0adae028214 (Python Regression run #39078691733; authorization workflow regression #39078691658)
 
 ## Virtuals acceptance
 - [ ] observed_writes includes `_validators`
 - [ ] verdict_reason != `state_unreadable`
 
-**Current gate status:** blocked. The observation capabilities and write-form capabilities have unit-level implementations, but production dispatch is not wired. Do not run the Virtuals campaign until every integration-gate checkbox above is supported by source and test evidence. Passing the gate establishes wiring only; it does not establish a vulnerability.
+**Current gate status:** integration gate passed on commit 0bd17c5fed8de47ee3c743ba7898e0adae028214. The Python Regression workflow and the authorization workflow's regression job both passed with `python -m pytest -q -rs`; the two new production-entry-point integration tests are included. The authorization campaign job was skipped because the workflow was triggered by a push, not `workflow_dispatch`. Virtuals has not been run against this integration commit. Do not infer either acceptance field from the older artifact; dispatch a fresh pinned Virtuals campaign and inspect its artifact before closing the final two checkboxes. Passing the integration gate establishes wiring only; it does not establish a vulnerability.
