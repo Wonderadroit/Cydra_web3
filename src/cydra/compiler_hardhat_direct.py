@@ -29,7 +29,6 @@ def compile_hardhat_direct(project: Path, source: Path) -> Any:
             int(raw.get("source_dependency_count", 0)),
             tuple(raw.get("unresolved_imports", ())),
             closure_status=str(raw.get("closure_status", "complete")),
-        source_closure=tuple(sorted((key, str(path)) for key, path in raw.get("source_paths", {}).items())),
             source_closure=tuple(sorted((key, str(path)) for key, path in raw.get("source_paths", {}).items())),
         )
     # Reuse the existing AST extractors by adapting Standard JSON output to the
@@ -61,4 +60,5 @@ def compile_hardhat_direct(project: Path, source: Path) -> Any:
         0, len(raw.get("sources_parsed", [])), bool(raw.get("target_source_present")),
         int(raw.get("source_dependency_count", 0)), tuple(raw.get("unresolved_imports", ())),
         closure_status=str(raw.get("closure_status", "complete")),
+        source_closure=tuple(sorted((key, str(path)) for key, path in raw.get("source_paths", {}).items())),
     )
