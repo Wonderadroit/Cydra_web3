@@ -77,3 +77,6 @@ Artifact: [campaign artifact](https://github.com/Wonderadroit/Cydra_web3/actions
 - [ ] verdict_reason != `state_unreadable`
 
 **Current gate status:** blocked. The observation capabilities and write-form capabilities have unit-level implementations, but production dispatch is not wired. Do not run the Virtuals campaign until every integration-gate checkbox above is supported by source and test evidence. Passing the gate establishes wiring only; it does not establish a vulnerability.
+
+## Preflight rule
+All verification branches use capability-based preflight, not SHA-based ancestry. A required capability is present if its focused tests pass, regardless of commit history. Squash merges, rebases, and cherry-picks can rewrite commit SHAs while preserving code; do not gate target execution on an original implementation SHA.
