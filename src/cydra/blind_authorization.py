@@ -367,13 +367,30 @@ def generate_blind_authorization_test_from_experiment(
     argument_list = ", ".join(arguments)
     observer_arguments = ", ".join(arguments[index] for index in observer_indexes)
     observer_call = f"target.{state_getter}({observer_arguments})"
-    state_snapshot = f"{state_type} beforeState = {observer_call};"
+    observer_parameter_types = ",".join(
+        function.parameters[index].type.split()[0] for index in observer_indexes
+    )
+    observer_signature = f"{state_getter}({observer_parameter_types})"
+    observer_encode_args = f", {observer_arguments}" if observer_arguments else ""
+    state_snapshot = (
+        f"(bool __stateOk, bytes memory __stateData) = address(target).staticcall("
+        f'abi.encodeWithSignature("{observer_signature}"{observer_encode_args}));\\n'
+        f'        require(__stateOk && __stateData.length >= 32, '
+        f'"CYDRA_MEASUREMENT_ASSERTION: preconditions_not_established:state_unreadable");\\n'
+        f"        {state_type} beforeState = abi.decode(__stateData, ({state_type}));"
+    )
     state_after = observer_call
     if principal is not None:
         principal_setup = (
-            f"address authorized = target.{principal}();\n"
-            '        require(authorized != address(0), "CYDRA_MEASUREMENT_ASSERTION: authorized principal unavailable");\n'
-            "        if (unauthorized == authorized) unauthorized = address(0xCAFD);"
+            f'(bool __ownerOk, bytes memory __ownerData) = address(target).staticcall('
+            f'abi.encodeWithSignature("{principal}()"));\\n'
+            '        require(__ownerOk && __ownerData.length >= 32, '
+            '"CYDRA_MEASUREMENT_ASSERTION: preconditions_not_established:authorized_control_unavailable");\\n'
+            '        address authorized = abi.decode(__ownerData, (address));\\n'
+            '        require(authorized != address(0), '
+            '"CYDRA_MEASUREMENT_ASSERTION: preconditions_not_established:authorized_control_unavailable");\\n'
+            '        require(authorized != unauthorized, '
+            '"CYDRA_MEASUREMENT_ASSERTION: preconditions_not_established:authorized_caller_not_distinct");'
         )
         control_lines = [
             "        vm.prank(unauthorized);",
@@ -395,10 +412,13 @@ def generate_blind_authorization_test_from_experiment(
             "        );",
         ]
     else:
-        # Without a source-derived authorized actor, an observed unauthorized
-        # state mutation can still support the hypothesis. Failure to reproduce
-        # it cannot establish rejection and must remain unmeasurable.
-        principal_setup = ""
+        # Without source-derived owner/role evidence, fail closed before the
+        # differential. A successful unauthorized call alone is not enough to
+        # claim a supported finding without the full causal/control evidence.
+        principal_setup = (
+            '        require(false, "CYDRA_MEASUREMENT_ASSERTION: '
+            'preconditions_not_established:authorized_control_unavailable");'
+        )
         control_lines = [
             "        vm.prank(unauthorized);",
             "        (bool unauthorizedOk,) = address(target).call(payload);",
@@ -442,9 +462,9 @@ contract CydraBlindAuthorizationTest {{
 
     function testAuthorizationDifferentialOnModeledState() public {{
         address unauthorized = address(0xCAFE);
-        {principal_setup}
         {mutable_value}
         {state_snapshot}
+        {principal_setup}
         bytes memory payload = abi.encodeWithSignature(
             "{function.name}({parameter_types})",
             {argument_list}
