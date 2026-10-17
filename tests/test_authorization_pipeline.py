@@ -1,7 +1,14 @@
 from pathlib import Path
+import shutil
+
+import pytest
 
 from cydra.authorization_pipeline import investigate_authorization
-from cydra.models import ContractModel, FunctionModel
+from cydra.ast_dataflow import SemanticRelationshipEvidence
+from cydra.authorization_runtime import classify_authorization_blind_execution
+from cydra.blind_authorization import generate_blind_authorization_test_from_experiment
+from cydra.foundry import ExecutionResult, run_foundry_test
+from cydra.models import ContractModel, Experiment, FunctionModel, Hypothesis, ParameterModel
 from cydra.reasoning import generate_access_control_hypotheses
 
 
@@ -188,3 +195,133 @@ def test_seed_generator_keeps_protected_state_writer_as_question(tmp_path: Path)
     seeds = generate_hypothesis_seeds(result.contracts)
     assert any(seed.target_function == "setManager" for seed in seeds)
     assert all("vulnerable" not in seed.question.lower() for seed in seeds)
+
+
+
+def test_guarded_setter_uses_authorized_vs_unauthorized_state_differential(tmp_path: Path):
+    if shutil.which("forge") is None:
+        pytest.skip("Foundry toolchain is not installed")
+    project = tmp_path / "foundry-project"
+    source = project / "src" / "OwnerTarget.sol"
+    source.parent.mkdir(parents=True)
+    (project / "test" / "generated").mkdir(parents=True)
+    (project / "foundry.toml").write_text(
+        "[profile.default]\nsrc = 'src'\ntest = 'test'\n",
+        encoding="utf-8",
+    )
+    source.write_text(
+        "pragma solidity ^0.8.20;\n"
+        "contract OwnerTarget {\n"
+        "  address public owner;\n"
+        "  address public manager;\n"
+        "  constructor() { owner = msg.sender; }\n"
+        "  modifier onlyOwner() { require(msg.sender == owner, 'owner'); _; }\n"
+        "  function setManager(address next) external onlyOwner { manager = next; }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    function = FunctionModel(
+        name="setManager", visibility="external", modifiers=("onlyOwner",),
+        writes=("manager",), external_calls=(), line=7,
+        parameters=(ParameterModel(name="next", type="address"),), source=str(source),
+    )
+    model = ContractModel(
+        name="OwnerTarget", source=str(source), functions=(function,), pragma="^0.8.20",
+        state_variables=("owner", "manager"),
+    )
+    hypothesis = Hypothesis(
+        hypothesis_id="H-AUTH-setManager",
+        claim="An arbitrary caller must not change manager.",
+        invariant_id="INV-AUTH-001",
+        target_function="setManager",
+        attacker_capability="arbitrary external caller",
+        expected_impact="unauthorized manager mutation",
+    )
+    experiment = Experiment(
+        experiment_id="E-AUTH-setManager",
+        hypothesis_id=hypothesis.hypothesis_id,
+        action="call setManager with a state-changing address",
+        discriminates=("authorized call changes manager", "unauthorized call reverts"),
+        cost=1.0,
+        planned_inputs=("address(0xCAFE)",),
+        target_function="setManager",
+    )
+    generated = generate_blind_authorization_test_from_experiment(
+        hypothesis, experiment, "../../src/OwnerTarget.sol", "OwnerTarget",
+        project / "test" / "generated" / "OwnerTarget.t.sol", model,
+    )
+    harness = generated.read_text(encoding="utf-8")
+
+    # Both controls execute the exact same calldata. The authorized control is
+    # not inferred from the fallback "call must revert" assertion.
+    assert "vm.prank(unauthorized);" in harness
+    assert "vm.prank(authorized);" in harness
+    assert "target.owner()" in harness
+    assert "target.manager()" in harness
+    assert "unauthorized differential control was not established" in harness
+    assert "authorized control failed" in harness
+    assert "authorized control did not change observed state" in harness
+    assert "unauthorized caller successfully invoked protected administrative operation" not in harness
+
+    execution = run_foundry_test(project, generated, experiment.experiment_id, "guarded-setter-fixture")
+    assert execution.executed is True
+    assert execution.tests_run == 1
+    assert execution.status == "PASS"
+    rejected = classify_authorization_blind_execution(hypothesis, execution)
+    assert rejected.measurement_verdict == "rejected"
+    assert rejected.benchmark_status == "not_confirmed"
+
+    supported_execution = ExecutionResult(
+        experiment_id=experiment.experiment_id, target="unguarded-setter-fixture",
+        command=("forge", "test"), exit_code=1, executed=True, tests_run=1,
+        tests_failed=1, status="FAIL",
+        stdout="CYDRA_SECURITY_ASSERTION: unauthorized caller mutated modeled administrative state",
+        stderr="",
+    )
+    supported = classify_authorization_blind_execution(hypothesis, supported_execution)
+    assert supported.measurement_verdict == "supported"
+    assert supported.benchmark_status == "confirmed"
+
+    unmeasurable_execution = ExecutionResult(
+        experiment_id=experiment.experiment_id, target="unmeasurable-fixture",
+        command=("forge", "test"), exit_code=1, executed=True, tests_run=1,
+        tests_failed=1, status="FAIL",
+        stdout="CYDRA_MEASUREMENT_ASSERTION: authorized control failed", stderr="",
+    )
+    unmeasurable = classify_authorization_blind_execution(hypothesis, unmeasurable_execution)
+    assert unmeasurable.measurement_verdict == "unmeasurable"
+    assert unmeasurable.benchmark_status == "proposed"
+
+
+def test_compiler_propagated_cross_source_writes_reach_authorization_seed(tmp_path: Path):
+    source = tmp_path / "AgentNftV2.sol"
+    source.write_text(
+        "pragma solidity ^0.8.20;\n"
+        "contract AgentNftV2 {\n"
+        "  mapping(uint256 => mapping(address => bool)) internal _validatorsMap;\n"
+        "  mapping(uint256 => address[]) internal _validators;\n"
+        "  mapping(uint256 => mapping(address => uint256)) internal _baseValidatorScore;\n"
+        "  function isValidator(uint256 virtualId, address validator) public view returns (bool) { return _validatorsMap[virtualId][validator]; }\n"
+        "  function addValidator(uint256 virtualId, address validator) public { if (isValidator(virtualId, validator)) return; _addValidator(virtualId, validator); _initValidatorScore(virtualId, validator); }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    states = ("_validators", "_validatorsMap", "_baseValidatorScore")
+    evidence = tuple(
+        SemanticRelationshipEvidence(
+            contract="AgentNftV2", function="addValidator", relation="writes", target=state,
+            confidence=0.94, source="solc-json-ast-internal-call:ValidatorRegistry.sol",
+            function_ast_node_id=100, metadata={"propagated_from_internal_call": "_addValidator" if state != "_baseValidatorScore" else "_initValidatorScore", "propagation": "transitive-internal-call"},
+        )
+        for state in states
+    )
+
+    result = investigate_authorization(source, target="virtuals-cross-source-fixture@pinned", semantic_evidence=evidence)
+    contract = next(item for item in result.contracts if item.name == "AgentNftV2")
+    function = next(item for item in contract.functions if item.name == "addValidator")
+    seed = next(item for item in result.seeds if item.target_function == "addValidator")
+
+    assert set(function.writes) == set(states)
+    assert set(seed.observed_writes) == set(states)
+    assert any(item.hypothesis_id == "H-AUTH-addValidator" for item in result.hypotheses)
+    assert {item.state for item in result.derived_effects if item.function == "addValidator"} >= set(states)

@@ -36,3 +36,7 @@ Read PROJECT_BIBLE.md before making changes.
 ## Required status vocabulary
 
 Use precise outcomes: CONFIRMED, REJECTED, NOT_SELECTED, BLOCKED, UNMEASURABLE, and NOT_RUN. A workflow can pass as a measurement job while its security gate remains not ready; state both outcomes explicitly.
+
+## Branch ancestry for verification
+
+- Any branch whose CI is used to verify a fix must include that fix's dependency commits in its ancestry. Before dispatching a verification run, compare the dependency branch and verification branch with `git merge-base` (or the equivalent GitHub compare result). If the merge base predates the dependency head, rebase or retarget the work and ensure the executed branch itself contains the dependency commits; changing a PR base alone does not change a workflow-dispatch branch's checked-out HEAD.
