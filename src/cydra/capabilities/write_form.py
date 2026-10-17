@@ -1,4 +1,10 @@
-"""Abstract interface for recognizing and extracting state-write forms."""
+"""Abstract interface for recognizing and extracting state-write forms.
+
+Implementations may receive analysis context (such as the compiler's
+state-variable declaration-ID map) through their constructor. Keep that
+injection in the implementation: the stable matches and extract_target
+method signatures do not carry hidden global state.
+"""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

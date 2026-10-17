@@ -30,3 +30,10 @@ Artifact: [campaign artifact](https://github.com/Wonderadroit/Cydra_web3/actions
 4. One final Virtuals cycle only. If it renders and produces a verdict, score it; if it is unmeasurable for a new reason, score that layer; if it fails for a third new reason, record it and move to a different supported-class target.
 
 **Definition of done:** the corpus records the failure layer; the selected target's experiment is actually executed; vulnerable and guarded controls discriminate; evidence is persisted. No finding claim without causal differential and independent reproduction.
+
+
+## Week 1 Day 2 — complete
+- PublicGetterObservation: scalar public-getter resolution extracted from _resolve_state_observer; missing/reverting reads fail closed with a recorded reason.
+- ScalarWrite: direct and compound scalar assignments use constructor-injected compiler declaration IDs; local shadowing is rejected and struct-field writes remain deferred.
+- Tests: 4 PublicGetterObservation tests and 5 ScalarWrite tests.
+- Gate: full Python regression passed on the implementation-equivalent code at commit 88f5cee86d704368aa0675f7779c194bc69990e0 (run #39076655550). The only subsequent change in this commit is this status entry.

@@ -7,6 +7,7 @@ from .models import ContractModel, Experiment, Hypothesis
 from .planned_call import render_function_arguments
 from .authorization_runtime import security_assertion_marker
 from .capabilities.owner_shape import OwnerShape
+from .capabilities.public_getter_observation import PublicGetterObservation
 
 
 def _constructor_argument(parameter, *, abi_only: bool = False) -> str:
@@ -125,11 +126,6 @@ def _resolve_state_observer(
         + re.escape(written) + r"\b",
         source_text,
     )
-    scalar = re.search(
-        r"\b(address(?:\s+payable)?|bool|uint\d*|int\d*|bytes\d*)\s+public\s+"
-        + re.escape(written) + r"\s*;",
-        source_text,
-    )
     target_params = [(p.name, p.type.split()[0]) for p in function.parameters]
 
     def indexes_for_names(names: list[str]) -> tuple[int, ...] | None:
@@ -141,8 +137,10 @@ def _resolve_state_observer(
             indexes.append(matches[0])
         return tuple(indexes)
 
-    if scalar:
-        return written, scalar.group(1).strip(), ()
+    scalar_observation = PublicGetterObservation(source_text)
+    scalar = scalar_observation.resolve(written)
+    if scalar is not None:
+        return scalar[0], scalar[1], ()
 
     if declaration:
         key_specs = [

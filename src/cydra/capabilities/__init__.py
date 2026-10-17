@@ -4,5 +4,14 @@ from .authority_shape import AuthorityShape
 from .observation import ObservationMethod
 from .write_form import WriteForm
 from .owner_shape import OwnerShape
+from .public_getter_observation import PublicGetterObservation
+from .scalar_write import ScalarWrite
 
-__all__ = ["AuthorityShape", "ObservationMethod", "WriteForm", "OwnerShape"]
+__all__ = [
+    "AuthorityShape",
+    "ObservationMethod",
+    "WriteForm",
+    "OwnerShape",
+    "PublicGetterObservation",
+    "ScalarWrite",
+]
