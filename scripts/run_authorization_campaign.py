@@ -444,6 +444,23 @@ def _json(v):
     return v
 
 
+def _compiler_summary(compiler):
+    """Serialize compiler readiness and evidence consistently on every campaign exit path."""
+    return {
+        "executed": compiler.executed,
+        "status": compiler.status,
+        "versions": list(compiler.compiler_versions),
+        "build_info_count": compiler.build_info_count,
+        "matched_source_count": compiler.matched_source_count,
+        "source_ast_found": compiler.source_ast_found,
+        "source_dependency_count": compiler.source_dependency_count,
+        "unresolved_imports": list(compiler.unresolved_imports),
+        "source_closure_status": getattr(compiler, "closure_status", "complete"),
+        "semantic_relationship_count": len(compiler.evidence),
+        "parameter_constraint_count": len(compiler.constraints),
+    }
+
+
 def _no_hypothesis_payload(target, compiler, result, related_intent_parity_hypotheses=()):
     """Preserve no-auth and unsupported-related-hypothesis outcomes without calling either a finding."""
     related = _json(related_intent_parity_hypotheses)
@@ -502,19 +519,7 @@ def _no_hypothesis_payload(target, compiler, result, related_intent_parity_hypot
             })
     return {
         "target": target,
-        "compiler": {
-            "executed": compiler.executed,
-            "status": compiler.status,
-            "versions": list(compiler.compiler_versions),
-            "build_info_count": compiler.build_info_count,
-            "matched_source_count": compiler.matched_source_count,
-            "source_ast_found": compiler.source_ast_found,
-            "source_dependency_count": compiler.source_dependency_count,
-            "unresolved_imports": list(compiler.unresolved_imports),
-            "source_closure_status": getattr(compiler, "closure_status", "complete"),
-            "semantic_relationship_count": len(compiler.evidence),
-            "parameter_constraint_count": len(compiler.constraints),
-        },
+        "compiler": _compiler_summary(compiler),
         "lifecycle_surfaces": lifecycle_surfaces,
         "contracts": [
             {
@@ -717,6 +722,7 @@ def main() -> int:
                 )
                 payload = {
                     "target": f"{args.target_repo}@{args.target_ref}:{args.target_path}",
+                    "compiler": _compiler_summary(compiler),
                     "hypothesis_seeds": _json(getattr(result, "seeds", ())),
                     "hypothesis": _json(hypothesis) if hypothesis else None,
                     "experiment": _json(experiment) if experiment else None,
@@ -794,6 +800,7 @@ def main() -> int:
                     outcome = classify_authorization_blind_execution(hypothesis, execution)
                     payload = {
                         "target": f"{args.target_repo}@{args.target_ref}:{args.target_path}",
+                        "compiler": _compiler_summary(compiler),
                         "hypothesis_seeds": _json(getattr(result, "seeds", ())),
                         "hypothesis": _json(hypothesis),
                         "experiment": _json(experiment),
@@ -825,7 +832,7 @@ def main() -> int:
                     f"{hypothesis.hypothesis_id}: status={execution.status} "
                     f"classification={outcome.benchmark_status} evidence={outcome.evidence.evidence_id}"
                 )
-                payload={"target":f"{args.target_repo}@{args.target_ref}:{args.target_path}","hypothesis_seeds":_json(getattr(result, "seeds", ())),"hypothesis":_json(hypothesis),"experiment":_json(experiment),"dependency_materialization":dependency_materialization,"blind_execution":_json(execution),"classification":outcome.benchmark_status,"measurement_verdict":outcome.measurement_verdict,"finding_gate":"CONFIRMED_ONLY"}
+                payload={"target":f"{args.target_repo}@{args.target_ref}:{args.target_path}","compiler":_compiler_summary(compiler),"hypothesis_seeds":_json(getattr(result, "seeds", ())),"hypothesis":_json(hypothesis),"experiment":_json(experiment),"dependency_materialization":dependency_materialization,"blind_execution":_json(execution),"classification":outcome.benchmark_status,"measurement_verdict":outcome.measurement_verdict,"finding_gate":"CONFIRMED_ONLY"}
                 if generated is not None:
                     payload["generated_test_path"] = str(generated)
                 if outcome.benchmark_status != args.expected_status:
