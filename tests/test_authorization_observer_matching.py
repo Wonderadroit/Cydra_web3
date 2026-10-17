@@ -120,7 +120,7 @@ def test_preconditions_probe_checks_staticcall_observer_before_authority(tmp_pat
         "modifier onlyOwner() { require(msg.sender == owner); _; } "
         "mapping(uint256 => mapping(address => bool)) private _validatorsMap; "
         "function isValidator(uint256, address) public view returns (bool) { "
-        "revert(\\"observer unavailable\\"); } "
+        "revert(\"observer unavailable\"); } "
         "function addValidator(uint256, address) external onlyOwner { } }",
         encoding="utf-8",
     )
