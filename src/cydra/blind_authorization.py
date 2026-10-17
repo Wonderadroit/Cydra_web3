@@ -372,7 +372,7 @@ def generate_blind_authorization_test_from_experiment(
     )
     observer_signature = f"{state_getter}({observer_parameter_types})"
     observer_encode_args = f", {observer_arguments}" if observer_arguments else ""
-    state_snapshot = "\\n".join((
+    state_snapshot = "\n".join((
         "(bool __stateOk, bytes memory __stateData) = address(target).staticcall("
         f'abi.encodeWithSignature("{observer_signature}"{observer_encode_args}));',
         'require(__stateOk && __stateData.length >= 32, '
@@ -381,7 +381,7 @@ def generate_blind_authorization_test_from_experiment(
     ))
     state_after = observer_call
     if principal is not None:
-        principal_setup = "\\n".join((
+        principal_setup = "\n".join((
             f'(bool __ownerOk, bytes memory __ownerData) = address(target).staticcall('
             f'abi.encodeWithSignature("{principal}()"));',
             'require(__ownerOk && __ownerData.length >= 32, '
