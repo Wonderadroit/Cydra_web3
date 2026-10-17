@@ -395,9 +395,8 @@ def generate_blind_authorization_test_from_experiment(
         control_lines = [
             "        vm.prank(unauthorized);",
             "        (bool unauthorizedOk,) = address(target).call(payload);",
-            f"        if (unauthorizedOk && {state_after} != beforeState) {{",
-            f'            require(false, "{security_assertion_marker()}: unauthorized caller mutated modeled administrative state");',
-            "        }",
+            f"        bool ok = !(unauthorizedOk && ({state_after} != beforeState));",
+            f'        require(ok, "{security_assertion_marker()}: unauthorized caller mutated modeled administrative state");',
             "        require(",
             f"            !unauthorizedOk && {state_after} == beforeState,",
             '            "CYDRA_MEASUREMENT_ASSERTION: unauthorized differential control was not established"',
@@ -422,9 +421,8 @@ def generate_blind_authorization_test_from_experiment(
             control_lines = [
                 "        vm.prank(unauthorized);",
                 "        (bool unauthorizedOk,) = address(target).call(payload);",
-                f"        if (unauthorizedOk && {state_after} != beforeState) {{",
-                f'            require(false, "{security_assertion_marker()}: unauthorized caller mutated modeled administrative state");',
-                "        }",
+                f"        bool ok = !(unauthorizedOk && ({state_after} != beforeState));",
+                f'        require(ok, "{security_assertion_marker()}: unauthorized caller mutated modeled administrative state");',
                 '        require(false, "CYDRA_MEASUREMENT_ASSERTION: authorized control unavailable; cannot establish rejected");',
             ]
         else:
@@ -435,9 +433,8 @@ def generate_blind_authorization_test_from_experiment(
             control_lines = [
                 "        vm.prank(unauthorized);",
                 "        (bool unauthorizedOk,) = address(target).call(payload);",
-                f"        if (unauthorizedOk && {state_after} != beforeState) {{",
-                f'            require(false, "{security_assertion_marker()}: unauthorized caller mutated modeled administrative state");',
-                "        }",
+                f"        bool ok = !(unauthorizedOk && ({state_after} != beforeState));",
+                f'        require(ok, "{security_assertion_marker()}: unauthorized caller mutated modeled administrative state");',
                 '        require(false, "CYDRA_MEASUREMENT_ASSERTION: authorized control unavailable; cannot establish rejected");',
             ]
     control_body = "\n".join(control_lines)
