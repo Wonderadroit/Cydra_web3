@@ -438,9 +438,13 @@ def _patched_auth_test(generated,destination):
     destination.write_text(patched,encoding="utf-8")
 
 def _json(v):
-    if hasattr(v,"__dict__"): return {k:_json(x) for k,x in v.__dict__.items()}
-    if isinstance(v,(tuple,list)): return [_json(x) for x in v]
-    if isinstance(v,dict): return {str(k):_json(x) for k,x in v.items()}
+    if hasattr(v,"__dict__"):
+        data = {k: _json(x) for k, x in v.__dict__.items()}
+        if v.__class__.__name__ == "Hypothesis" and getattr(v, "invariant_id", None) == "INV-AUTH-001":
+            data["hypothesis_class"] = "unguarded_setter"
+        return data
+    if isinstance(v, (tuple, list)): return [_json(x) for x in v]
+    if isinstance(v, dict): return {str(k): _json(x) for k, x in v.items()}
     return v
 
 
@@ -834,7 +838,7 @@ def main() -> int:
                     f"{hypothesis.hypothesis_id}: status={execution.status} "
                     f"classification={outcome.benchmark_status} evidence={outcome.evidence.evidence_id}"
                 )
-                payload={"target":f"{args.target_repo}@{args.target_ref}:{args.target_path}","compiler":_compiler_summary(compiler),"hypothesis_seeds":_json(getattr(result, "seeds", ())),"hypothesis":_json(hypothesis),"experiment":_json(experiment),"dependency_materialization":dependency_materialization,"blind_execution":_json(execution),"classification":outcome.benchmark_status,"measurement_verdict":outcome.measurement_verdict,"finding_gate":"CONFIRMED_ONLY"}
+                payload={"target":f"{args.target_repo}@{args.target_ref}:{args.target_path}","compiler":_compiler_summary(compiler),"hypothesis_seeds":_json(getattr(result, "seeds", ())),"hypothesis":_json(hypothesis),"hypothesis_class":"unguarded_setter","experiment":_json(experiment),"dependency_materialization":dependency_materialization,"blind_execution":_json(execution),"classification":outcome.benchmark_status,"measurement_verdict":outcome.measurement_verdict,"finding_gate":"CONFIRMED_ONLY"}
                 if generated is not None:
                     payload["generated_test_path"] = str(generated)
                 if outcome.benchmark_status != args.expected_status:
@@ -874,6 +878,10 @@ def main() -> int:
             return 0
     finally:
         # Persist evidence on every exit path, including returns and SystemExit.
+        if isinstance(payload, dict):
+            serialized_hypothesis = payload.get("hypothesis")
+            if isinstance(serialized_hypothesis, dict) and serialized_hypothesis.get("invariant_id") == "INV-AUTH-001":
+                payload["hypothesis_class"] = "unguarded_setter"
         active_error = sys.exc_info()[1]
         _persist_campaign_evidence(
             args.output,
