@@ -827,7 +827,7 @@ def main() -> int:
                     isolated_source = execution_project / source_relative
                     auth_context = "\n".join(
                         path.read_text(encoding="utf-8")
-                        for path in sorted(execution_project.rglob("*.sol")) if "test" not in path.relative_to(execution_project).parts
+                        for path in sorted(execution_project.rglob("*.sol")) if path.is_file() and "test" not in path.relative_to(execution_project).parts
                     )
                     modifier = _auth_modifier(auth_context)
                     print("AUTHORIZATION_CONTROL", modifier)
