@@ -6,6 +6,7 @@ import re
 from .models import ContractModel, Experiment, Hypothesis
 from .planned_call import render_function_arguments
 from .authorization_runtime import security_assertion_marker
+from .capabilities.owner_shape import OwnerShape
 
 
 def _constructor_argument(parameter, *, abi_only: bool = False) -> str:
