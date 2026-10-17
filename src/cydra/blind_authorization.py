@@ -118,10 +118,10 @@ def _resolve_state_observer(
     # Public scalar or mapping auto-getter. For mappings, extract keys from the
     # declaration in order; do not reuse target-function parameter order blindly.
     declaration = re.search(
-        r"\bmapping\s*\(\s*([A-Za-z_]\w*(?:\s+payable)?)\s+(\w+)\s*=>\s*"
-        r"(?:(?:mapping\s*\(\s*([A-Za-z_]\w*(?:\s+payable)?)\s+(\w+)\s*=>\s*)?)*"
-        r"([A-Za-z_]\w*(?:\s+payable)?)\s*\)?\s*\)?\s*"
-        r"(public|private|internal)\s+" + re.escape(written) + r"\b",
+        r"\\bmapping\\s*\\(\\s*([A-Za-z_]\\w*)\\s*(?:([A-Za-z_]\\w*))?\\s*=>\\s*"
+        r"mapping\\s*\\(\\s*([A-Za-z_]\\w*)\\s*(?:([A-Za-z_]\\w*))?\\s*=>\\s*"
+        r"([A-Za-z_]\\w*)\\s*(?:([A-Za-z_]\\w*))?\\s*\\)\\s*\\)\\s*public\\s+"
+        + re.escape(written) + r"\\b",
         source_text,
     )
     scalar = re.search(
@@ -142,6 +142,23 @@ def _resolve_state_observer(
 
     if scalar:
         return written, scalar.group(1).strip(), ()
+
+    if declaration:
+        key_specs = [
+            (declaration.group(1), declaration.group(2)),
+            (declaration.group(3), declaration.group(4)),
+        ]
+        indexes = []
+        for key_type, key_name in key_specs:
+            named = [i for i, (param_name, _) in enumerate(target_params) if key_name and param_name == key_name]
+            typed = [i for i, (_, param_type) in enumerate(target_params) if param_type == key_type]
+            choices = named if len(named) == 1 else typed if len(typed) == 1 else []
+            if not choices:
+                indexes = []
+                break
+            indexes.append(choices[0])
+        if len(indexes) == len(key_specs):
+            return written, declaration.group(5).strip(), tuple(indexes)
 
     # Prefer an explicit public/external view function whose body reads the
     # exact state target and whose argument names can be bound to target inputs.
