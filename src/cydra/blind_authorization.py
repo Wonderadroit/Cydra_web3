@@ -59,7 +59,7 @@ def _source_closure_text(source_path: str | Path) -> str:
     pending = [root]
     seen: set[Path] = set()
     chunks: list[str] = []
-    import_re = re.compile(r'''\\bimport\\s+(?:[^"']+\\s+from\\s+)?["']([^"']+)["']\\s*;''')
+    import_re = re.compile(r'''\bimport\s+(?:[^"']+\s+from\s+)?["']([^"']+)["']\s*;''')
     while pending:
         current = pending.pop()
         if current in seen or not current.is_file() or current.suffix != ".sol":
@@ -75,12 +75,12 @@ def _source_closure_text(source_path: str | Path) -> str:
                 candidate = (current.parent / imported).resolve()
                 if candidate not in seen:
                     pending.append(candidate)
-    return "\\n".join(chunks)
+    return "\n".join(chunks)
 
 
 def _function_body_for_name(source_text: str, name: str) -> str | None:
     for match in re.finditer(
-        r"\\bfunction\\s+" + re.escape(name) + r"\\s*\\([^)]*\\)[^{;]*\\{",
+        r"\bfunction\s+" + re.escape(name) + r"\s*\([^)]*\)[^{;]*\{",
         source_text,
         re.DOTALL,
     ):
@@ -100,7 +100,7 @@ def _function_body_for_name(source_text: str, name: str) -> str | None:
 def _parameter_names_and_types(signature: str) -> list[tuple[str, str]]:
     parameters = []
     for item in signature.split(","):
-        words = re.sub(r"\\b(memory|calldata|storage|payable)\\b", "", item).strip().split()
+        words = re.sub(r"\b(memory|calldata|storage|payable)\b", "", item).strip().split()
         if len(words) >= 2:
             parameters.append((words[-1], words[0]))
     return parameters
@@ -118,15 +118,15 @@ def _resolve_state_observer(
     # Public scalar or mapping auto-getter. For mappings, extract keys from the
     # declaration in order; do not reuse target-function parameter order blindly.
     declaration = re.search(
-        r"\\bmapping\\s*\\(\\s*([A-Za-z_]\\w*(?:\\s+payable)?)\\s+(\\w+)\\s*=>\\s*"
-        r"(?:(?:mapping\\s*\\(\\s*([A-Za-z_]\\w*(?:\\s+payable)?)\\s+(\\w+)\\s*=>\\s*)?)*"
-        r"([A-Za-z_]\\w*(?:\\s+payable)?)\\s*\\)?\\s*\\)?\\s*"
-        r"(public|private|internal)\\s+" + re.escape(written) + r"\\b",
+        r"\bmapping\s*\(\s*([A-Za-z_]\w*(?:\s+payable)?)\s+(\w+)\s*=>\s*"
+        r"(?:(?:mapping\s*\(\s*([A-Za-z_]\w*(?:\s+payable)?)\s+(\w+)\s*=>\s*)?)*"
+        r"([A-Za-z_]\w*(?:\s+payable)?)\s*\)?\s*\)?\s*"
+        r"(public|private|internal)\s+" + re.escape(written) + r"\b",
         source_text,
     )
     scalar = re.search(
-        r"\\b(address(?:\\s+payable)?|bool|uint\\d*|int\\d*|bytes\\d*)\\s+public\\s+"
-        + re.escape(written) + r"\\s*;",
+        r"\b(address(?:\s+payable)?|bool|uint\d*|int\d*|bytes\d*)\s+public\s+"
+        + re.escape(written) + r"\s*;",
         source_text,
     )
     target_params = [(p.name, p.type.split()[0]) for p in function.parameters]
@@ -146,19 +146,19 @@ def _resolve_state_observer(
     # Prefer an explicit public/external view function whose body reads the
     # exact state target and whose argument names can be bound to target inputs.
     function_pattern = re.compile(
-        r"\\bfunction\\s+([A-Za-z_]\\w*)\\s*\\(([^)]*)\\)\\s*"
+        r"\bfunction\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*"
         r"((?:(?:public|external|internal|private|view|pure|virtual|override|returns|payable|"
-        r"memory|calldata|storage|\\w+)\\s*)*)\\s*returns\\s*\\(\\s*"
-        r"(address(?:\\s+payable)?|bool|uint\\d*|int\\d*|bytes\\d*)[^)]*\\)\\s*\\{",
+        r"memory|calldata|storage|\w+)\s*)*)\s*returns\s*\(\s*"
+        r"(address(?:\s+payable)?|bool|uint\d*|int\d*|bytes\d*)[^)]*\)\s*\{",
         re.DOTALL,
     )
     explicit = []
     for match in function_pattern.finditer(source_text):
         name, params, qualifiers, return_type = match.group(1), match.group(2), match.group(3), match.group(4)
-        if not re.search(r"\\b(public|external)\\b", qualifiers) or not re.search(r"\\bview\\b", qualifiers):
+        if not re.search(r"\b(public|external)\b", qualifiers) or not re.search(r"\bview\b", qualifiers):
             continue
         body = _function_body_for_name(source_text, name)
-        if body is None or not re.search(r"\\b" + re.escape(written) + r"\\b", body):
+        if body is None or not re.search(r"\b" + re.escape(written) + r"\b", body):
             continue
         parsed = _parameter_names_and_types(params)
         indexes = indexes_for_names([name for name, _ in parsed])
@@ -180,18 +180,18 @@ def _resolve_state_observer(
     # addValidator -> isValidator(virtualId, validator).
     target_body = _function_body_for_name(source_text, function.name)
     if target_body:
-        for call in re.finditer(r"\\b([A-Za-z_]\\w*)\\s*\\(([^()]*)\\)", target_body):
+        for call in re.finditer(r"\b([A-Za-z_]\w*)\s*\(([^()]*)\)", target_body):
             name, args = call.group(1), call.group(2)
             body = _function_body_for_name(source_text, name)
-            if body is None or not re.search(r"\\b" + re.escape(written) + r"\\b", body):
+            if body is None or not re.search(r"\b" + re.escape(written) + r"\b", body):
                 continue
             arg_names = [part.strip() for part in args.split(",") if part.strip()]
             indexes = indexes_for_names(arg_names)
             if indexes is None:
                 continue
             signature = re.search(
-                r"\\bfunction\\s+" + re.escape(name) + r"\\s*\\([^)]*\\)[^{;]*returns\\s*\\(\\s*"
-                r"(address(?:\\s+payable)?|bool|uint\\d*|int\\d*|bytes\\d*)",
+                r"\bfunction\s+" + re.escape(name) + r"\s*\([^)]*\)[^{;]*returns\s*\(\s*"
+                r"(address(?:\s+payable)?|bool|uint\d*|int\d*|bytes\d*)",
                 source_text,
                 re.DOTALL,
             )
@@ -316,6 +316,11 @@ def generate_blind_authorization_test_from_experiment(
     # Mutate a target argument that actually feeds the observer. For mapping
     # readers this keeps the pre/post reads on the same key selected for calldata.
     candidate_indexes = list(observer_indexes)
+    if not candidate_indexes:
+        candidate_indexes = [
+            i for i, parameter in enumerate(function.parameters)
+            if parameter.type.split()[0] == state_type.split()[0]
+        ]
     candidate_indexes.sort(key=lambda i: (0 if function.parameters[i].type.split()[0] == "address" else 1, i))
     for index in candidate_indexes:
         parameter_base = function.parameters[index].type.split()[0]
