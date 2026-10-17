@@ -119,7 +119,7 @@ def test_preconditions_probe_checks_staticcall_observer_before_authority(tmp_pat
         "address public owner; constructor() { owner = msg.sender; } "
         "modifier onlyOwner() { require(msg.sender == owner); _; } "
         "mapping(uint256 => mapping(address => bool)) private _validatorsMap; "
-        "function isValidator(uint256 virtualId, address account) public view returns (bool) { "
+        "function isValidator(uint256 virtualId, address validator) public view returns (bool) { "
         "bool ignored = _validatorsMap[virtualId][validator]; ignored; "
         "revert(\"observer unavailable\"); } "
         "function addValidator(uint256, address) external onlyOwner { } }",
