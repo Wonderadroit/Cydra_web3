@@ -43,7 +43,7 @@ def test_mapping_write_uses_one_hop_is_reader_for_authorization_differential(
         f"contract {name} {{\n"
         "  mapping(uint256 => mapping(address => bool)) private _validatorsMap;\n"
         f"  {modifier}"
-        "  function isValidator(uint256 virtualId, address validator) public view returns (bool) { "
+        "  function isValidator(uint256 virtualId, address account) public view returns (bool) { "
         "return _validatorsMap[virtualId][account]; }\n"
         f"  function addValidator(uint256 virtualId, address validator) external{guard} {{ "
         "if (isValidator(virtualId, validator)) return; "
