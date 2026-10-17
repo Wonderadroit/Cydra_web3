@@ -77,10 +77,11 @@ def _resolve_import(project: Path, importer: str, spec: str,
     return None
 
 
-def _closure(project: Path, entry: Path) -> tuple[dict[str, str], list[str]]:
+def _closure(project: Path, entry: Path) -> tuple[dict[str, str], list[str], dict[str, str]]:
     remappings = _remappings(project)
     entry_unit = entry.resolve().relative_to(project.resolve()).as_posix()
     contents: dict[str, str] = {}
+    source_paths: dict[str, str] = {}
     unresolved: set[str] = set()
     pending: list[tuple[str, Path]] = [(entry_unit, entry.resolve())]
     import_re = re.compile(r"""\bimport\s+(?:[^;]*?\s+from\s+)?['"]([^'"]+)['"]\s*;""", re.S)
@@ -99,6 +100,7 @@ def _closure(project: Path, entry: Path) -> tuple[dict[str, str], list[str]]:
             unresolved.add(f"{unit}: source_unreadable")
             continue
         contents[unit] = source
+        source_paths[unit] = str(path.resolve())
         for spec in import_re.findall(strip_comments(source)):
             resolved = _resolve_import(project, unit, spec, remappings)
             # A package source-unit name (e.g. @sample/pkg/A.sol) need not mirror
@@ -116,7 +118,7 @@ def _closure(project: Path, entry: Path) -> tuple[dict[str, str], list[str]]:
                 unresolved.add(f"{unit}: {spec}")
             elif resolved[0] not in contents:
                 pending.append(resolved)
-    return contents, sorted(unresolved)
+    return contents, sorted(unresolved), source_paths
 
 
 def _compatible_version(contents: dict[str, str], requested: str | None = None) -> tuple[str | None, str]:
@@ -171,9 +173,9 @@ def compile_standard_json(project: Path, entry: Path) -> dict[str, Any]:
                 "errors_count": 0, "fatal_errors": [], "sources_parsed": [],
                 "target_source_present": False, "stderr_excerpt": "py-solc-x is not installed",
                 "process_exit_status": None, "unresolved_imports": [],
-                "compiler_command": ["solcx.compile_standard"]}
+                "compiler_command": ["solcx.compile_standard"], "source_paths": {}}
     try:
-        contents, unresolved = _closure(project.resolve(), entry.resolve())
+        contents, unresolved, source_paths = _closure(project.resolve(), entry.resolve())
     except (OSError, ValueError) as exc:
         return {"status": "source_closure_failed", "solc_version_used": None,
                 "errors_count": 0, "fatal_errors": [], "sources_parsed": [],
@@ -246,7 +248,7 @@ def compile_standard_json(project: Path, entry: Path) -> dict[str, Any]:
                     "fatal_errors": [{"severity": "error", "message": message}], "sources_parsed": [], "target_source_present": False,
                     "stderr_excerpt": message, "process_exit_status": None, "unresolved_imports": unresolved,
                     "source_dependency_count": len(contents), "compiler_command": ["solcx.compile_standard", "--version", version],
-                    "input": input_json}
+                    "input": input_json, "source_paths": source_paths}
     errors = output.get("errors", []) if isinstance(output, dict) else []
     fatal = [item for item in errors if isinstance(item, dict) and item.get("severity") == "error"]
     _persist_solc_diagnostics(project.resolve(), input_json, errors if isinstance(errors, list) else [])
@@ -263,4 +265,4 @@ def compile_standard_json(project: Path, entry: Path) -> dict[str, Any]:
             "stderr_excerpt": _redact(diagnostic_text), "process_exit_status": 0 if not fatal else 1,
             "unresolved_imports": unresolved, "source_dependency_count": len(contents),
             "compiler_command": ["solcx.compile_standard", "--version", version],
-            "output": output, "input": input_json}
+            "output": output, "input": input_json, "source_paths": source_paths}
