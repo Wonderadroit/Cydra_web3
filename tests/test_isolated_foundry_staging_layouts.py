@@ -27,7 +27,7 @@ LAYOUTS = [
             "lib/forge-std/src/Test.sol":
                 "pragma solidity ^0.8.20; library Test { function value() internal pure returns (uint256) { return 1; } }",
         },
-        ["src/lib/forge-std/src/Test.sol"],
+        ["lib/forge-std/src/Test.sol"],
         id="local-lib",
     ),
     pytest.param(
@@ -40,7 +40,7 @@ LAYOUTS = [
             "lib/vendor/nested/src/Base.sol":
                 "pragma solidity ^0.8.20; contract Base { function value() public pure returns (uint256) { return 2; } }",
         },
-        ["src/lib/vendor/nested/src/Child.sol", "src/lib/vendor/nested/src/Base.sol"],
+        ["lib/vendor/nested/src/Child.sol", "lib/vendor/nested/src/Base.sol"],
         id="nested-lib",
     ),
     pytest.param(
@@ -152,7 +152,10 @@ def test_isolated_foundry_staging_supports_five_dependency_layouts(
         monkeypatch.setattr(subprocess, "run", original_run)
 
     isolated = tmp_path / f"{layout}-isolated"
-    _prepare_isolated_foundry_project(target, source, isolated)
+    source_key = source.relative_to(target).as_posix()
+    closure = {source_key: source}
+    closure.update({relative: target / relative for relative in dependencies})
+    _prepare_isolated_foundry_project(target, closure, isolated, required_keys=(source_key,))
 
     for relative in expected_paths:
         assert (isolated / relative).is_file(), f"{layout}: missing staged dependency {relative}"
