@@ -446,18 +446,20 @@ def _json(v):
 
 def _compiler_summary(compiler):
     """Serialize compiler readiness and evidence consistently on every campaign exit path."""
+    evidence = getattr(compiler, "evidence", ())
+    constraints = getattr(compiler, "constraints", ())
     return {
-        "executed": compiler.executed,
-        "status": compiler.status,
-        "versions": list(compiler.compiler_versions),
-        "build_info_count": compiler.build_info_count,
-        "matched_source_count": compiler.matched_source_count,
-        "source_ast_found": compiler.source_ast_found,
-        "source_dependency_count": compiler.source_dependency_count,
-        "unresolved_imports": list(compiler.unresolved_imports),
+        "executed": getattr(compiler, "executed", False),
+        "status": getattr(compiler, "status", "unknown"),
+        "versions": list(getattr(compiler, "compiler_versions", ())),
+        "build_info_count": getattr(compiler, "build_info_count", 0),
+        "matched_source_count": getattr(compiler, "matched_source_count", 0),
+        "source_ast_found": getattr(compiler, "source_ast_found", False),
+        "source_dependency_count": getattr(compiler, "source_dependency_count", 0),
+        "unresolved_imports": list(getattr(compiler, "unresolved_imports", ())),
         "source_closure_status": getattr(compiler, "closure_status", "complete"),
-        "semantic_relationship_count": len(compiler.evidence),
-        "parameter_constraint_count": len(compiler.constraints),
+        "semantic_relationship_count": len(evidence),
+        "parameter_constraint_count": len(constraints),
     }
 
 
