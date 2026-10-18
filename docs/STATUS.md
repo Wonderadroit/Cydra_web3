@@ -1,7 +1,12 @@
 # CYDRA Web3 — Status
 
-**Updated:** 2026-10-17  
+**Updated:** 2026-10-18  
 **Rule:** LLMs propose. Tools test. Evidence decides. This file is the current status; PR count is not a status signal.
+
+## Five-target batch — in progress
+Targets selected: 0/5
+Gate: verdict produced (any of supported/rejected/unmeasurable),
+      not infrastructure failure
 
 ## On `main`
 - The repository has an authorization-focused pipeline, source-effect modeling, direct-solc/compiler-closure work, campaign artifact persistence, and paired differential fixtures.
