@@ -80,3 +80,13 @@ Artifact: [campaign artifact](https://github.com/Wonderadroit/Cydra_web3/actions
 
 ## Preflight rule
 All verification branches use capability-based preflight, not SHA-based ancestry. A required capability is present if its focused tests pass, regardless of commit history. Squash merges, rebases, and cherry-picks can rewrite commit SHAs while preserving code; do not gate target execution on an original implementation SHA.
+
+
+## Virtuals scoring — run #39079508714
+- **Corpus classification:** supported (expected) | unmeasurable | `failure_layer: preconditions`.
+- **Pinned target:** `code-423n4/2025-04-virtuals-protocol@28e93273daec5a9c73c438e216dde04c084be452`, `contracts/virtualPersona/AgentNftV2.sol::addValidator`.
+- **Observed writes:** `_baseValidatorScore`, `_validators`, `_validatorsMap`. Compiler succeeded (Solc 0.8.26); 48-source closure complete; unresolved imports 0.
+- **Execution result:** the unprivileged `addValidator` call itself reverted with panic `0x51` after emitting `NewValidator` in the trace. Because the call reverted, the event/state effects were rolled back. The authorized-control comparison could not be established. This is **not evidence of an unauthorized mutation** and no vulnerability is claimed.
+- **Disposition:** park Virtuals; do not reopen proxy/`Initializable` support (Issue #68) in this validation batch. Freeze harness feature work and move to five narrow caller-based authorization targets.
+- **Artifact follow-up:** Issue [#90](https://github.com/Wonderadroit/Cydra_web3/issues/90) tracks top-level `observed_writes` and `verdict_reason` serialization. It is non-blocking for target search.
+- **Evidence:** [workflow run #39079508714](https://github.com/Wonderadroit/Cydra_web3/actions/runs/39079508714), artifact ID `12118143215`.
