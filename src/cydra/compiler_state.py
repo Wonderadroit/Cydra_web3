@@ -72,6 +72,36 @@ def _project_remappings(project: Path) -> tuple[tuple[str, str], ...]:
                 prefix, target = candidate.split("=", 1)
                 if prefix and target:
                     mappings.append((prefix, target))
+    # Foundry infers common remappings from installed libraries when no explicit
+    # mapping covers the package prefix. Mirror only known standard layouts and
+    # only when the expected directory exists; do not guess arbitrary packages.
+    explicit_prefixes = {prefix for prefix, _target in mappings}
+    lib_dir = project / "lib"
+    inferred_layouts = {
+        "openzeppelin-contracts": (
+            "@openzeppelin/contracts/",
+            "contracts/",
+        ),
+        "openzeppelin-contracts-upgradeable": (
+            "@openzeppelin/contracts-upgradeable/",
+            "contracts/",
+        ),
+        "solady": ("solady/", "src/"),
+        "forge-std": ("forge-std/", "src/"),
+    }
+    if lib_dir.is_dir():
+        for library in lib_dir.iterdir():
+            if not library.is_dir() or library.name not in inferred_layouts:
+                continue
+            prefix, subdirectory = inferred_layouts[library.name]
+            # An explicit broader or narrower mapping takes precedence over
+            # inference for the same import namespace.
+            if any(prefix.startswith(existing) or existing.startswith(prefix)
+                   for existing in explicit_prefixes):
+                continue
+            target_dir = library / subdirectory
+            if target_dir.is_dir():
+                mappings.append((prefix, (Path("lib") / library.name / subdirectory).as_posix()))
     return tuple(sorted(set(mappings), key=lambda item: len(item[0]), reverse=True))
 
 
