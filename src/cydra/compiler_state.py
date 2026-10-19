@@ -101,7 +101,7 @@ def _project_remappings(project: Path) -> tuple[tuple[str, str], ...]:
                 continue
             target_dir = library / subdirectory
             if target_dir.is_dir():
-                mappings.append((prefix, (Path("lib") / library.name / subdirectory).as_posix()))
+                mappings.append((prefix, (Path("lib") / library.name / subdirectory).as_posix().rstrip("/") + "/"))
     return tuple(sorted(set(mappings), key=lambda item: len(item[0]), reverse=True))
 
 
