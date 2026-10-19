@@ -1,7 +1,12 @@
 # CYDRA Web3 — Status
 
-**Updated:** 2026-10-17  
+**Updated:** 2026-10-18  
 **Rule:** LLMs propose. Tools test. Evidence decides. This file is the current status; PR count is not a status signal.
+
+## Five-target batch — in progress
+Targets selected: 0/5
+Gate: verdict produced (any of supported/rejected/unmeasurable),
+      not infrastructure failure
 
 ## On `main`
 - The repository has an authorization-focused pipeline, source-effect modeling, direct-solc/compiler-closure work, campaign artifact persistence, and paired differential fixtures.
@@ -30,3 +35,63 @@ Artifact: [campaign artifact](https://github.com/Wonderadroit/Cydra_web3/actions
 4. One final Virtuals cycle only. If it renders and produces a verdict, score it; if it is unmeasurable for a new reason, score that layer; if it fails for a third new reason, record it and move to a different supported-class target.
 
 **Definition of done:** the corpus records the failure layer; the selected target's experiment is actually executed; vulnerable and guarded controls discriminate; evidence is persisted. No finding claim without causal differential and independent reproduction.
+
+
+## Week 1 Day 2 — complete
+- PublicGetterObservation: scalar public-getter resolution extracted from _resolve_state_observer; missing/reverting reads fail closed with a recorded reason.
+- ScalarWrite: direct and compound scalar assignments use constructor-injected compiler declaration IDs; local shadowing is rejected and struct-field writes remain deferred.
+- Tests: 4 PublicGetterObservation tests and 5 ScalarWrite tests.
+- Gate: full Python regression passed on the implementation-equivalent code at commit 88f5cee86d704368aa0675f7779c194bc69990e0 (run #39076655550). The only subsequent change in this commit is this status entry.
+
+
+## Week 1 Day 3 — complete
+- NestedMappingWrite: detects assignment and compound-assignment writes through one or more IndexAccess nodes, returning the compiler-identified state-variable root.
+- Negative boundary: MemberAccess roots are rejected; local struct fields are not treated as contract-state mappings.
+- Tests: 5 focused tests passed in the full regression.
+- CI evidence: implementation commit e8010881698008943ac32d0ee4ba96c0fc20e077 passed Python Regression run [#39077235129](https://github.com/Wonderadroit/Cydra_web3/actions/runs/39077235129) and pull-request regression [#39077238528](https://github.com/Wonderadroit/Cydra_web3/actions/runs/39077238528). Authorization campaign job was skipped; no target experiment or finding is claimed.
+- Observation interfaces unchanged. Day 4 implemented ArrayPushWrite as a separate capability.
+
+
+## Week 1 Day 4 — complete
+- ArrayPushWrite: recognizes FunctionCall nodes whose callee is a push/pop MemberAccess and whose receiver resolves through zero or more IndexAccess nodes to a compiler-identified state-variable Identifier.
+- Root extraction is explicit: `_validators[virtualId].push(validator)` returns `_validators`; indexed entries are not treated as the write target.
+- Tests: 5 focused tests passed in full regression, including mapping-entry push, direct state-array push, mapping-entry pop, local-array rejection by declaration identity, and base-root extraction for a mapping-entry array.
+- CI evidence: implementation commit [67ad55935219ff4563bb42377f73783c4e3a9a3f](https://github.com/Wonderadroit/Cydra_web3/commit/67ad55935219ff4563bb42377f73783c4e3a9a3f) passed Python Regression run [#39077595226](https://github.com/Wonderadroit/Cydra_web3/actions/runs/39077595226). The authorization workflow's Python regression also passed in [#39077595229](https://github.com/Wonderadroit/Cydra_web3/actions/runs/39077595229); its blind authorization campaign job was skipped. No Virtuals campaign or finding is claimed.
+- WriteForm and observation interfaces unchanged. Day 5 is MappingGetterObservation only; Day 6 is ExplicitViewReaderObservation. Virtuals remains open until a campaign artifact proves the expected write roots and observation path are wired.
+
+## Week 1 Day 5 — MappingGetterObservation
+- Extended ObservationMethod.emit_probe and read_state with optional argument lists. Existing one-argument call sites remain valid; this is an explicit interface extension for mapping observations.
+- Added MappingGetterObservation for source-backed public mapping getters and conventional getX view readers. It fails closed with the shared reason vocabulary for missing getters, argument-arity mismatches, and reverting calls.
+- Boundary test is deliberate: a private nested mapping read by isValidator is not claimed by MappingGetterObservation. It returns getter_not_found and leaves custom semantic readers to Day 6 ExplicitViewReaderObservation; no raw-storage or arbitrary-candidate fallback.
+- The existing PublicGetterObservation implementation used different legacy missing/revert strings than the intended shared vocabulary, so those paths were normalized to getter_not_found and call_reverted; its tests were updated accordingly.
+- Tests: five focused MappingGetterObservation tests plus the updated PublicGetterObservation regression passed in Python Regression run [#39077941503](https://github.com/Wonderadroit/Cydra_web3/actions/runs/39077941503) on implementation commit [c5c0291d1c96958c81fffa259fd5d1fc452fa4a1](https://github.com/Wonderadroit/Cydra_web3/commit/c5c0291d1c96958c81fffa259fd5d1fc452fa4a1). The blind authorization campaign job was skipped; no Virtuals campaign or finding is claimed.
+- Next: Day 6 ExplicitViewReaderObservation, then one Virtuals campaign. Do not dispatch the campaign before Day 6.
+
+- Deferred defensive gap: MappingGetterObservation does not yet validate an unexpected runtime return type (return_type_mismatch). Direct compiler-backed mapping getters are type-checked by Solidity; add a focused test if a real target exposes this mismatch. This gap does not block Day 6.
+- Integration audit before Day 6: blind_authorization.py imports PublicGetterObservation but still contains its own inline resolver; it does not dispatch through an observation-method list, and MappingGetterObservation is not called there. ast_dataflow.py contains none of ScalarWrite, NestedMappingWrite, or ArrayPushWrite; the write-form capabilities are not dispatched there. Treat both chains as unwired until explicit integration and regression prove otherwise.
+
+## Integration gate — do not run Virtuals until:
+- [ ] WriteForm preserves indexed args (or extract_args added)
+- [ ] _resolve_state_observer dispatches through capability list, records method_used
+- [ ] ast_dataflow dispatches through write-form list, records write_method
+- [ ] Two production-entry-point integration tests pass
+- [ ] Full regression green
+
+## Virtuals acceptance
+- [ ] observed_writes includes `_validators`
+- [ ] verdict_reason != `state_unreadable`
+
+**Current gate status:** blocked. The observation capabilities and write-form capabilities have unit-level implementations, but production dispatch is not wired. Do not run the Virtuals campaign until every integration-gate checkbox above is supported by source and test evidence. Passing the gate establishes wiring only; it does not establish a vulnerability.
+
+## Preflight rule
+All verification branches use capability-based preflight, not SHA-based ancestry. A required capability is present if its focused tests pass, regardless of commit history. Squash merges, rebases, and cherry-picks can rewrite commit SHAs while preserving code; do not gate target execution on an original implementation SHA.
+
+
+## Virtuals scoring — run #39079508714
+- **Corpus classification:** supported (expected) | unmeasurable | `failure_layer: preconditions`.
+- **Pinned target:** `code-423n4/2025-04-virtuals-protocol@28e93273daec5a9c73c438e216dde04c084be452`, `contracts/virtualPersona/AgentNftV2.sol::addValidator`.
+- **Observed writes:** `_baseValidatorScore`, `_validators`, `_validatorsMap`. Compiler succeeded (Solc 0.8.26); 48-source closure complete; unresolved imports 0.
+- **Execution result:** the unprivileged `addValidator` call itself reverted with panic `0x51` after emitting `NewValidator` in the trace. Because the call reverted, the event/state effects were rolled back. The authorized-control comparison could not be established. This is **not evidence of an unauthorized mutation** and no vulnerability is claimed.
+- **Disposition:** park Virtuals; do not reopen proxy/`Initializable` support (Issue #68) in this validation batch. Freeze harness feature work and move to five narrow caller-based authorization targets.
+- **Artifact follow-up:** Issue [#90](https://github.com/Wonderadroit/Cydra_web3/issues/90) tracks top-level `observed_writes` and `verdict_reason` serialization. It is non-blocking for target search.
+- **Evidence:** [workflow run #39079508714](https://github.com/Wonderadroit/Cydra_web3/actions/runs/39079508714), artifact ID `12118143215`.

@@ -2,8 +2,16 @@ name: CYDRA Web3 Authorization Specialist
 
 on:
   push:
-    branches: [main, "migration/**"]
+    branches: ["**"]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+      - ".github/workflows/*.yml"
   pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+      - ".github/workflows/*.yml"
   workflow_dispatch:
     inputs:
       program_url:
@@ -48,7 +56,7 @@ jobs:
       - uses: foundry-rs/foundry-toolchain@v1
       - run: python -m pip install --upgrade pip pytest
       - run: python -m pip install -e .
-      - run: python -m pytest -q
+      - run: python -m pytest -q -rs
 
   blind-authorization-campaign:
     if: github.event_name == 'workflow_dispatch'
@@ -57,10 +65,24 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Preflight direct-solc capabilities
+        run: |
+          python -m pip install --upgrade pip pytest
+          python -m pip install -e .
+          python -m pytest -q tests/test_compiler_standard_json_diagnostics.py tests/test_solc_second_level_import.py
+          echo "DIRECT_SOLC_CAPABILITIES=PASS"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - uses: foundry-rs/foundry-toolchain@v1
+      - name: Set up pnpm for pinned target dependency materialization
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - name: Verify pnpm availability
+        run: pnpm --version
       - run: python -m pip install --upgrade pip pytest
       - run: python -m pip install -e .
       - name: Record scope and immutable target intake
@@ -102,6 +124,7 @@ jobs:
           TARGET_PATH: ${{ inputs.target_path }}
           TARGET_PROJECT: ${{ inputs.target_project }}
           REQUIRE_READY: ${{ inputs.require_ready }}
+          CYDRA_SOLC_DIAGNOSTIC_DIR: ${{ runner.temp }}
         run: |
           set -o pipefail
           args=(
@@ -124,5 +147,8 @@ jobs:
             ${{ runner.temp }}/target-intake.txt
             ${{ runner.temp }}/authorization-campaign.json
             ${{ runner.temp }}/authorization-campaign.log
+            ${{ runner.temp }}/generated-tests/
+            ${{ runner.temp }}/solc-input-keys.json
+            ${{ runner.temp }}/solc-errors.json
           if-no-files-found: warn
           retention-days: 14

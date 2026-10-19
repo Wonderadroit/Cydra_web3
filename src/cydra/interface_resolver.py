@@ -99,19 +99,50 @@ def _split_parameters(text: str) -> tuple[str, ...]:
 
 
 def parse_remappings(root: str | Path) -> tuple[tuple[str, str], ...]:
+    """Load target remappings from remappings.txt and foundry.toml.
+
+    Later sources override an earlier mapping with the same prefix. TOML is
+    parsed with tomllib where available; the small fallback keeps Python 3.10
+    compatibility without introducing a runtime dependency.
+    """
     root = Path(root)
+    result: dict[str, str] = {}
+
     path = root / "remappings.txt"
-    if not path.exists():
-        return ()
-    result: list[tuple[str, str]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        match = _REMAP_RE.match(line)
-        if match:
-            result.append(match.groups())
-    return tuple(result)
+    if path.is_file():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            match = _REMAP_RE.match(line)
+            if match:
+                prefix, destination = match.groups()
+                result[prefix] = destination
+
+    foundry_toml = root / "foundry.toml"
+    if foundry_toml.is_file():
+        text = foundry_toml.read_text(encoding="utf-8")
+        configured: list[str] = []
+        try:
+            import tomllib
+            config = tomllib.loads(text)
+            configured = config.get("profile", {}).get("default", {}).get("remappings", [])
+        except (ImportError, ValueError):
+            # Supports the common multiline remappings array on Python 3.10.
+            match = re.search(
+                r"(?ms)^\s*remappings\s*=\s*\[(.*?)\]",
+                text,
+            )
+            if match:
+                configured = re.findall(r"""["']([^"']+)["']""", match.group(1))
+        for entry in configured:
+            if isinstance(entry, str) and "=" in entry:
+                prefix, destination = entry.split("=", 1)
+                prefix, destination = prefix.strip(), destination.strip()
+                if prefix and destination:
+                    result[prefix] = destination
+
+    return tuple(result.items())
 
 
 def resolve_import(root: str | Path, importer: str | Path, import_path: str) -> tuple[Path, str] | None:
@@ -129,6 +160,13 @@ def resolve_import(root: str | Path, importer: str | Path, import_path: str) -> 
         relative = (importer.parent / import_path).resolve()
         if relative.is_file():
             return relative, "relative_import"
+
+    # Foundry auto-detects common library packages under lib/. Support the
+    # standard OpenZeppelin package layout only when the candidate exists.
+    if import_path.startswith("@openzeppelin/"):
+        candidate = root / "lib" / "openzeppelin-contracts" / import_path[len("@openzeppelin/"):]
+        if candidate.is_file():
+            return candidate, "foundry_library_inference"
 
     # Foundry also permits project-root-relative imports in generated/source
     # contexts. Treat an existing repository-relative path as authoritative

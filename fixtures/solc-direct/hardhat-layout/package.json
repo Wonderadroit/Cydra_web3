@@ -1,0 +1,5 @@
+{
+  "name": "cydra-direct-solc-fixture",
+  "private": true,
+  "devDependencies": { "hardhat": "^2.22.0" }
+}
