@@ -54,6 +54,74 @@ def _declared_modifiers(contract: ContractModel, function: FunctionModel) -> tup
     return function.modifiers or _source_declared_modifiers(contract, function)
 
 
+def _modifier_body_enforces_authorization(contract: ContractModel, modifier_name: str) -> bool:
+    """Recognize only a caller-scoped reverting guard in a modifier body.
+
+    A modifier name such as onlyOwner is not proof of enforcement. This lexical
+    check is intentionally conservative; runtime execution remains decisive.
+    """
+    try:
+        source = Path(contract.source).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return False
+    source = _strip_signature_comments(source)
+    pattern = re.compile(
+        rf"\bmodifier\s+{re.escape(modifier_name)}\s*(?:\([^)]*\))?\s*\{{",
+        re.MULTILINE,
+    )
+    for match in pattern.finditer(source):
+        opening = source.find("{", match.start())
+        depth = 0
+        body = None
+        for index in range(opening, len(source)):
+            if source[index] == "{":
+                depth += 1
+            elif source[index] == "}":
+                depth -= 1
+                if depth == 0:
+                    body = source[opening + 1:index]
+                    break
+        if body is None:
+            continue
+        for guard in re.finditer(r"\b(?:require|if)\s*\(", body):
+            opening_paren = body.find("(", guard.start())
+            predicate = _balanced_parens(body, opening_paren)
+            if not re.search(r"(?:msg\.sender|_msgSender\s*\(\s*\)|tx\.origin)", predicate):
+                continue
+            if guard.group(0).startswith("require"):
+                return True
+            tail = body[opening_paren + len(predicate) + 2:]
+            branch_open = tail.find("{")
+            if branch_open >= 0 and re.search(r"\brevert\b", _balanced_braces(tail, branch_open)):
+                return True
+            if branch_open < 0 and re.match(r"\s*revert\b", tail):
+                return True
+    return False
+
+
+def _balanced_parens(source: str, opening: int) -> str:
+    depth = 0
+    for index in range(opening, len(source)):
+        if source[index] == "(":
+            depth += 1
+        elif source[index] == ")":
+            depth -= 1
+            if depth == 0:
+                return source[opening + 1:index]
+    return source[opening + 1:]
+
+
+def _balanced_braces(source: str, opening: int) -> str:
+    depth = 0
+    for index in range(opening, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[opening + 1:index]
+    return source[opening + 1:]
+
 def _effective_declared_modifiers(contract: ContractModel, function: FunctionModel) -> tuple[str, ...]:
     """Include base-function modifiers only when the override explicitly dispatches via super.
 

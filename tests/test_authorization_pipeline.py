@@ -188,3 +188,39 @@ def test_seed_generator_keeps_protected_state_writer_as_question(tmp_path: Path)
     seeds = generate_hypothesis_seeds(result.contracts)
     assert any(seed.target_function == "setManager" for seed in seeds)
     assert all("vulnerable" not in seed.question.lower() for seed in seeds)
+
+
+def test_modifier_name_without_caller_guard_does_not_suppress_seed_candidate(tmp_path: Path):
+    source = tmp_path / "FakeProtected.sol"
+    source.write_text(
+        "pragma solidity ^0.8.20;\n"
+        "contract FakeProtected {\n"
+        "  address public manager;\n"
+        "  modifier onlyOwner() { _; }\n"
+        "  function configure(address next) external onlyOwner { manager = next; }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    result = investigate_authorization(source, target="fake-modifier-negative-control@pinned")
+
+    # The modifier name looks privileged, but its body imposes no caller guard.
+    assert any(item.target_function == "configure" for item in result.hypotheses)
+
+
+def test_caller_guarded_modifier_suppresses_seed_candidate(tmp_path: Path):
+    source = tmp_path / "ActuallyProtected.sol"
+    source.write_text(
+        "pragma solidity ^0.8.20;\n"
+        "contract ActuallyProtected {\n"
+        "  address public owner;\n"
+        "  address public manager;\n"
+        "  modifier onlyOwner() { require(msg.sender == owner, 'owner'); _; }\n"
+        "  function configure(address next) external onlyOwner { manager = next; }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    result = investigate_authorization(source, target="guarded-modifier-positive-control@pinned")
+
+    assert all(item.target_function != "configure" for item in result.hypotheses)
