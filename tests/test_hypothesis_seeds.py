@@ -84,3 +84,72 @@ def test_seed_coverage_counts_as_measurement_not_finding_readiness():
     assert _seed_coverage_allows_measurement([], [object()])
     assert not _seed_coverage_allows_measurement([object()], [object()])
     assert not _seed_coverage_allows_measurement([], [])
+
+
+def test_inherited_effect_path_is_evaluated_once(tmp_path: Path):
+    source = tmp_path / "Base.sol"
+    source.write_text(
+        'contract Base { function execute() public { target.call(""); } }',
+        encoding="utf-8",
+    )
+    inherited = FunctionModel(
+        "execute", "public", (), (), (), 1, source=str(source),
+        body_scope="in_scope",
+    )
+    contract = ContractModel("Child", str(source), (), inherited_functions=(inherited,))
+    seeds = generate_hypothesis_seeds((contract,))
+    assert len(seeds) == 1
+    assert seeds[0].target_function == "execute"
+    assert seeds[0].status == "blocked"
+
+
+def test_direct_declaration_wins_over_same_inherited_signature(tmp_path: Path):
+    source = tmp_path / "Child.sol"
+    source.write_text(
+        "contract Child { function setValue(uint256 next) external { value = next; } }",
+        encoding="utf-8",
+    )
+    direct = FunctionModel(
+        "setValue", "external", (), ("value",), (), 1,
+        parameters=(), source=str(source),
+    )
+    inherited = FunctionModel(
+        "setValue", "external", (), (), (), 10,
+        parameters=(), source=str(tmp_path / "Base.sol"),
+    )
+    contract = ContractModel(
+        "Child", str(source), (direct,), state_variables=("value",),
+        inherited_functions=(inherited,),
+    )
+    seeds = generate_hypothesis_seeds((contract,))
+    assert len(seeds) == 1
+    assert seeds[0].source == str(source)
+
+
+def test_nearest_inherited_declaration_wins_over_distant_ancestor(tmp_path: Path):
+    nearest_source = tmp_path / "Parent.sol"
+    distant_source = tmp_path / "Grandparent.sol"
+    nearest_source.write_text(
+        "contract Parent { function setValue(uint256 next) external { value = next; } }",
+        encoding="utf-8",
+    )
+    distant_source.write_text(
+        "contract Grandparent { function setValue(uint256 next) external {} }",
+        encoding="utf-8",
+    )
+    nearest = FunctionModel(
+        "setValue", "external", (), ("value",), (), 5,
+        parameters=(), source=str(nearest_source),
+    )
+    distant = FunctionModel(
+        "setValue", "external", (), (), (), 8,
+        parameters=(), source=str(distant_source),
+    )
+    contract = ContractModel(
+        "Child", str(nearest_source), (), state_variables=("value",),
+        inherited_functions=(nearest, distant),
+    )
+    seeds = generate_hypothesis_seeds((contract,))
+    assert len(seeds) == 1
+    assert seeds[0].source == str(nearest_source)
+    assert seeds[0].status == "seed"
