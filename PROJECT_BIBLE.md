@@ -61,3 +61,13 @@ Reentrancy, arithmetic, signature replay, oracle manipulation, intent parity, ge
 ## Operator responsibility
 
 The operator verifies program eligibility, scope, permitted testing methods, target revision, and any external disclosure. Use local forks or controlled environments where possible. Do not send transactions or interact with live assets unless the program explicitly permits the exact activity.
+
+## Mandatory hypothesis-generation rule
+
+Hypotheses are questions, not conclusions. The generator must emit traceable provisional authorization hypothesis seeds from meaningful target observations without requiring exploit proof, complete deployment-state evidence, or complete extraction first. Missing facts belong in the seed's uncertainty/prerequisite fields and may block an experiment; they must not silently suppress the question.
+
+Keep these stages explicit: facts → semantic observations → hypothesis seeds → prioritized hypotheses → executable experiments → evidence-based disposition. For example, a modeled lifecycle function that writes a privileged manager address should seed a question about whether an unauthorized caller can change that state in a reachable deployment. It must not be called vulnerable without testing, and it must not be discarded merely because initialization state is not yet known.
+
+Every zero-hypothesis campaign must trigger a hypothesis-generation audit: review the actual relationships, constraints, state effects, guards, and provenance; map plausible observations to falsifiable questions; classify whether the signal was absent, not modeled, not converted to a seed, filtered, or unable to reach an executable experiment; and record evidence for that diagnosis. Fix a measured generic gap, add a regression, and replay controls. Do not default to another broad extraction rewrite.
+
+See [Agent Instructions](../AGENTS.md) and [Hypothesis Generation Doctrine](docs/HYPOTHESIS_GENERATION_DOCTRINE.md) for the mandatory rules and report fields.
