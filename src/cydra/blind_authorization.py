@@ -4,7 +4,7 @@ from pathlib import Path
 import re
 
 from .models import ContractModel, Experiment, Hypothesis
-from .planned_call import render_function_call
+from .planned_call import render_function_arguments
 from .authorization_runtime import security_assertion_marker
 
 
@@ -79,8 +79,7 @@ def generate_blind_authorization_test_from_experiment(
     if function.visibility not in {"public", "external"}:
         raise ValueError(f"authorization target {function.name} is not externally callable")
 
-    call = render_function_call(experiment, function)
-    arguments = call.removeprefix(f"target.{function.name}(").removesuffix(");")
+    arguments = render_function_arguments(experiment, function)
     constructor_arguments = _constructor_arguments(
         contract_model, abi_only=creation_bytecode is not None
     )
@@ -109,6 +108,9 @@ def generate_blind_authorization_test_from_experiment(
         source_text = Path(contract_model.source).read_text(encoding="utf-8")
     except (OSError, UnicodeError):
         source_text = ""
+
+    # A verdict is measurable only when the generated harness can observe a
+    # state variable written by the target operation.
     for written in function.writes:
         match = re.search(
             rf"\b(address(?:\s+payable)?|bool|uint\d*|int\d*)\s+public\s+{re.escape(written)}\s*;",
@@ -118,47 +120,133 @@ def generate_blind_authorization_test_from_experiment(
             state_type = match.group(1).strip()
             state_getter = written
             break
+    if state_getter is None:
+        raise ValueError(
+            "no matching public scalar getter for modeled writes; authorization differential is unmeasurable"
+        )
 
-    state_view = ""
-    if state_getter is not None:
-        state_snapshot = f"        {state_type} beforeState = target.{state_getter}();"
-        post_state = f"target.{state_getter}()"
-        call_assertion = f'''        require(ok, "{security_assertion_marker()}: authorization call reverted before invariant observation");
-        require(
-            {post_state} == beforeState,
-            "{security_assertion_marker()}: unauthorized caller mutated modeled administrative state"
-        );'''
+    # Resolve the authorized actor only from a recognized modifier guard in the
+    # target source. Do not guess owner/admin identity from names alone.
+    modifier_bodies = {
+        match.group(1): match.group(2)
+        for match in re.finditer(
+            r"\bmodifier\s+([A-Za-z_]\w*)\s*\([^)]*\)\s*\{([^{}]*)\}",
+            source_text,
+            re.DOTALL,
+        )
+    }
+    principal = None
+    for modifier in function.modifiers:
+        body = modifier_bodies.get(modifier)
+        if body is None:
+            continue
+        guard = re.search(
+            r"\bmsg\s*\.\s*sender\s*==\s*([A-Za-z_]\w*)|"
+            r"\b([A-Za-z_]\w*)\s*==\s*msg\s*\.\s*sender\b",
+            body,
+        )
+        if guard:
+            candidate = guard.group(1) or guard.group(2)
+            if re.search(
+                rf"\baddress(?:\s+payable)?\s+public\s+{re.escape(candidate)}\s*;",
+                source_text,
+            ):
+                principal = candidate
+                break
+    # Use a valid, state-changing argument vector for both callers. The attacker
+    # is tested first; the authorized control then uses the exact same calldata.
+    # If no argument can be varied consistently with the observed state type, fail
+    # closed instead of claiming an authorization verdict.
+    mutable_value = None
+    state_base = state_type.split()[0]
+    for index, parameter in enumerate(function.parameters):
+        parameter_base = parameter.type.split()[0]
+        if parameter_base != state_base:
+            continue
+        if state_type == "address payable":
+            mutable_value = (
+                f"address payable nextValue = payable(address(0xBEEF));\n"
+                f"        if (nextValue == target.{state_getter}()) nextValue = payable(address(0xF00D));"
+            )
+        elif state_base == "address":
+            mutable_value = (
+                f"address nextValue = address(0xBEEF);\n"
+                f"        if (nextValue == target.{state_getter}()) nextValue = address(0xF00D);"
+            )
+        elif state_base == "bool":
+            mutable_value = f"bool nextValue = !target.{state_getter}();"
+        elif state_base.startswith(("uint", "int")):
+            mutable_value = (
+                f"{state_base} nextValue = target.{state_getter}() == 0 ? 1 : 0;"
+            )
+        if mutable_value is not None:
+            arguments = tuple(
+                "nextValue" if position == index else argument
+                for position, argument in enumerate(arguments)
+            )
+            break
+    if mutable_value is None:
+        raise ValueError(
+            "no supported input can be tied to the observed state getter; authorization differential is unmeasurable"
+        )
+
+    parameter_types = ",".join(parameter.type.split()[0] for parameter in function.parameters)
+    argument_list = ", ".join(arguments)
+    state_snapshot = f"{state_type} beforeState = target.{state_getter}();"
+    state_after = f"target.{state_getter}()"
+    if principal is not None:
+        principal_setup = (
+            f"address authorized = target.{principal}();\n"
+            '        require(authorized != address(0), "CYDRA_MEASUREMENT_ASSERTION: authorized principal unavailable");\n'
+            "        if (unauthorized == authorized) unauthorized = address(0xCAFD);"
+        )
+        control_lines = [
+            "        vm.prank(unauthorized);",
+            "        (bool unauthorizedOk,) = address(target).call(payload);",
+            f"        if (unauthorizedOk && {state_after} != beforeState) {{",
+            f'            require(false, "{security_assertion_marker()}: unauthorized caller mutated modeled administrative state");',
+            "        }",
+            "        require(",
+            f"            !unauthorizedOk && {state_after} == beforeState,",
+            '            "CYDRA_MEASUREMENT_ASSERTION: unauthorized differential control was not established"',
+            "        );",
+            "",
+            "        vm.prank(authorized);",
+            "        (bool authorizedOk,) = address(target).call(payload);",
+            '        require(authorizedOk, "CYDRA_MEASUREMENT_ASSERTION: authorized control failed");',
+            "        require(",
+            f"            {state_after} != beforeState,",
+            '            "CYDRA_MEASUREMENT_ASSERTION: authorized control did not change observed state"',
+            "        );",
+        ]
     else:
-        state_snapshot = ""
-        call_assertion = f'''        require(
-            !ok,
-            "{security_assertion_marker()}: unauthorized caller successfully invoked protected administrative operation"
-        );'''
-
-    # Avoid Solidity's `new Target(...)` syntax here. Foundry's preprocessor
-    # rewrites nested `new` expressions into generated free-function helpers;
-    # those helpers are not parseable by historical Solidity 0.6.x targets.
-    # Assemble the target creation bytecode explicitly so constructor execution
-    # remains real while the harness stays compiler-version neutral.
-    constructor_suffix = (
-        f"abi.encode({constructor_arguments})" if constructor_arguments else 'bytes("")'
-    )
+        # Without a source-derived authorized actor, an observed unauthorized
+        # state mutation can still support the hypothesis. Failure to reproduce
+        # it cannot establish rejection and must remain unmeasurable.
+        principal_setup = ""
+        control_lines = [
+            "        vm.prank(unauthorized);",
+            "        (bool unauthorizedOk,) = address(target).call(payload);",
+            f"        if (unauthorizedOk && {state_after} != beforeState) {{",
+            f'            require(false, "{security_assertion_marker()}: unauthorized caller mutated modeled administrative state");',
+            "        }",
+            '        require(false, "CYDRA_MEASUREMENT_ASSERTION: authorized control unavailable; cannot establish rejected");',
+        ]
+    control_body = "\n".join(control_lines)
     source = f'''// SPDX-License-Identifier: UNLICENSED
 pragma solidity {pragma};
 // Hypothesis: {hypothesis.hypothesis_id}
 // Experiment: {experiment.experiment_id}
-// One-sided invariant test: no patched target or benchmark answer is imported.
+// Differential control: unauthorized caller first, authorized caller second, identical calldata.
 import {{ {target_type} }} from "{target_import}";
 
-contract CydraUnauthorizedCaller {{
-    function execute(address target, bytes calldata payload) external returns (bool, bytes memory) {{
-        return target.call(payload);
-    }}
+interface Vm {{
+    function prank(address msgSender) external;
 }}
 
 contract CydraBlindAuthorizationTest {{
-    {target_declaration}
-    CydraUnauthorizedCaller internal attacker;
+    Vm private constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
+    {target_type} internal target;
 
     function _targetCreationCode() internal pure returns (bytes memory) {{
         return type({target_type}).creationCode;
@@ -167,7 +255,7 @@ contract CydraBlindAuthorizationTest {{
     function setUp() public {{
         bytes memory initCode = abi.encodePacked(
             _targetCreationCode(),
-            {constructor_suffix}
+            {constructor_encoding}
         );
         address deployed;
         assembly {{
@@ -175,19 +263,18 @@ contract CydraBlindAuthorizationTest {{
         }}
         require(deployed != address(0), "CYDRA: constructor deployment failed");
         target = {target_type}(payable(deployed));
-        attacker = new CydraUnauthorizedCaller();
     }}
 
-    function testUnauthorizedCallerCannotMutateModeledAdministrativeState() public {{
-{state_snapshot}
-        (bool ok,) = attacker.execute(
-            address(target),
-            abi.encodeWithSignature(
-                "{function.name}({','.join(parameter.type.split()[0] for parameter in function.parameters)})",
-                {arguments}
-            )
+    function testAuthorizationDifferentialOnModeledState() public {{
+        address unauthorized = address(0xCAFE);
+        {principal_setup}
+        {state_snapshot}
+        {mutable_value}
+        bytes memory payload = abi.encodeWithSignature(
+            "{function.name}({parameter_types})",
+            {argument_list}
         );
-{call_assertion}
+        {control_body}
     }}
 }}
 '''

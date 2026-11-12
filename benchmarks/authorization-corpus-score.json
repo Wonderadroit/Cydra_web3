@@ -1,0 +1,23 @@
+[
+  {
+    "case": "guarded-setter-fixture",
+    "expected_outcome": "rejected",
+    "actual_outcome": "rejected",
+    "failure_layer": "none"
+  },
+  {
+    "case": "unguarded-setter-fixture",
+    "expected_outcome": "supported",
+    "actual_outcome": "supported",
+    "failure_layer": "none"
+  },
+  {
+    "case": "virtuals-addValidator@28e93273daec",
+    "expected_outcome": "unmeasurable",
+    "actual_outcome": "unmeasurable",
+    "failure_layer": "compilation",
+    "evidence_run": "38858836698",
+    "evidence_commit": "f9c893155b06f1eb21e0df73fce3074b5f61f652",
+    "note": "Run artifact reports compiler.status=compile_failed, build_info_count=0, source_ast_found=false, semantic_relationship_count=0; no direct-solc source_unit_keys/solc_errors diagnostics present. Classification is compilation-path failure pending ancestry/preflight verification."
+  }
+]
