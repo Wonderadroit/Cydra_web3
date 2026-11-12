@@ -1,0 +1,34 @@
+name: TransferGuardFactory Boundary Test
+
+on:
+  pull_request:
+    paths:
+      - "tests/fixtures/transfer_guard_factory/**"
+      - ".github/workflows/transfer-guard-factory-boundary.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-pinned-foundry-boundaries:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
+      - name: Checkout exact target revision and dependencies
+        env:
+          TARGET_SHA: 96a18e376e8f95bbb243a774609945749d3a0b3e
+        run: |
+          git clone https://github.com/3FLabs/grunt.git "$RUNNER_TEMP/grunt"
+          cd "$RUNNER_TEMP/grunt"
+          git checkout "$TARGET_SHA"
+          git submodule update --init --recursive
+      - name: Inject test into disposable target checkout and run Foundry
+        run: |
+          target="$RUNNER_TEMP/grunt"
+          mkdir -p "$target/test/cydra"
+          cp tests/fixtures/transfer_guard_factory/TransferGuardFactoryBoundary.t.sol "$target/test/cydra/TransferGuardFactoryBoundary.t.sol"
+          cd "$target"
+          forge test --match-path test/cydra/TransferGuardFactoryBoundary.t.sol -vvv
